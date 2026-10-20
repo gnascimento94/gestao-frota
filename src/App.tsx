@@ -1,3 +1,143 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Aviso, useEstadoArmazenamento } from './ui/Aviso'
+import { Barra } from './ui/Barra'
+import { Cartao } from './ui/Cartao'
+import { Desfazer, DesfazerProvider } from './ui/Desfazer'
+import { CabecalhoFolha, Folha } from './ui/Folha'
+
+export type Ecra =
+  | { nome: 'inicio' }
+  | { nome: 'carros' }
+  | { nome: 'carro'; id: number }
+  | { nome: 'motoristas' }
+  | { nome: 'relatorios' }
+  | { nome: 'planos' }
+  | { nome: 'backup' }
+
+const TITULOS: Record<Ecra['nome'], string> = {
+  inicio: 'Início',
+  carros: 'Carros',
+  carro: 'Carro',
+  motoristas: 'Motoristas',
+  relatorios: 'Relatórios',
+  planos: 'Planos de manutenção',
+  backup: 'Backup',
+}
+
 export default function App() {
-  return <h1>Frota</h1>
+  return (
+    <DesfazerProvider>
+      <Concha />
+    </DesfazerProvider>
+  )
+}
+
+function Concha() {
+  const [ecra, setEcra] = useState<Ecra>({ nome: 'inicio' })
+  const [lancar, setLancar] = useState<{ aberta: boolean; origem: DOMRect | null }>({
+    aberta: false,
+    origem: null,
+  })
+  const [pesquisa, setPesquisa] = useState('')
+  const gravacao = useEstadoArmazenamento()
+  const refLancar = useRef<HTMLButtonElement>(null)
+  const refPesquisa = useRef<HTMLInputElement>(null)
+  const refPrincipal = useRef<HTMLElement>(null)
+
+  const abrirLancar = useCallback((origem: DOMRect | null) => {
+    setLancar({ aberta: true, origem })
+  }, [])
+  const fecharLancar = useCallback(() => setLancar((l) => ({ ...l, aberta: false })), [])
+
+  // Atalhos globais: Ctrl+N (lançar), Ctrl+K (pesquisar). Esc é tratado pela folha.
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
+      const k = e.key.toLowerCase()
+      if (k === 'n') {
+        e.preventDefault()
+        if (!lancar.aberta) abrirLancar(refLancar.current?.getBoundingClientRect() ?? null)
+      } else if (k === 'k') {
+        e.preventDefault()
+        if (lancar.aberta) return
+        refPesquisa.current?.focus()
+        refPesquisa.current?.select()
+      }
+    }
+    window.addEventListener('keydown', tecla)
+    return () => window.removeEventListener('keydown', tecla)
+  }, [abrirLancar, lancar.aberta])
+
+  const navegar = useCallback((e: Ecra) => {
+    setEcra(e)
+    refPrincipal.current?.scrollTo({ top: 0 })
+  }, [])
+
+  const titulo = TITULOS[ecra.nome]
+
+  return (
+    <div className="app">
+      <Barra
+        ecra={ecra}
+        onNavegar={navegar}
+        onLancar={abrirLancar}
+        refLancar={refLancar}
+        gravacao={gravacao}
+      />
+
+      <main className="principal" ref={refPrincipal}>
+        <header className="topo">
+          <div className="topo-titulos">
+            <h1 className="topo-titulo">{titulo}</h1>
+            {ecra.nome === 'carro' && <div className="topo-sub">Carro n.º {ecra.id}</div>}
+          </div>
+          <label className="busca">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.5-3.5" />
+            </svg>
+            <input
+              ref={refPesquisa}
+              type="search"
+              placeholder="Procurar matrícula"
+              aria-label="Procurar matrícula"
+              aria-keyshortcuts="Control+K"
+              value={pesquisa}
+              onChange={(e) => setPesquisa(e.target.value)}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <kbd aria-hidden="true">Ctrl K</kbd>
+          </label>
+        </header>
+
+        <Aviso {...gravacao} />
+
+        <div className="conteudo">
+          <EcraVazio titulo={titulo} />
+        </div>
+      </main>
+
+      <Folha aberta={lancar.aberta} origem={lancar.origem} onFechar={fecharLancar} rotulo="Lançar">
+        <CabecalhoFolha titulo="Lançar" onFechar={fecharLancar} />
+        <div className="folha-corpo">
+          <p className="texto-discreto">O formulário de lançamento chega numa próxima etapa.</p>
+        </div>
+      </Folha>
+
+      <Desfazer />
+    </div>
+  )
+}
+
+/** Ecrã ainda por construir (as próximas etapas preenchem cada um). */
+function EcraVazio({ titulo }: { titulo: string }) {
+  return (
+    <Cartao>
+      <div className="vazio">
+        <strong>{titulo}</strong>
+        Este ecrã ainda está em construção.
+      </div>
+    </Cartao>
+  )
 }

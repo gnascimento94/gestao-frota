@@ -126,13 +126,12 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app, event| match event {
-        // Síncrono, antes de a janela fechar.
-        // ATENÇÃO: se no futuro o fecho puder ser impedido (`api.prevent_close()`,
-        // p.ex. para pedir confirmação), `fechar` tem de passar para
-        // `ExitRequested`/`WindowEvent::Destroyed`; aqui fecharia os dados de uma
-        // janela que afinal continua aberta.
+        // Síncrono, quando a janela é destruída. Não em `CloseRequested`: o frontend escuta
+        // `onCloseRequested` (para correr os apagamentos pendentes do "Desfazer"), o que faz
+        // o Tauri impedir o fecho e só destruir a janela depois de o handler JS terminar —
+        // fechar os dados em `CloseRequested` fá-los-ia falhar.
         RunEvent::WindowEvent {
-            event: WindowEvent::CloseRequested { .. },
+            event: WindowEvent::Destroyed,
             ..
         } => fechar(app),
         // Saída por outro caminho (p.ex. última janela destruída): `fechar` só atua uma vez.

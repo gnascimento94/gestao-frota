@@ -1,0 +1,119 @@
+/* Tokens de design — estilo Apple adaptado ao Windows 11.
+   A cor de destaque muda-se num só sítio: --destaque. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Cor */
+  --destaque: #0071e3;
+  --destaque-suave: rgb(0 113 227 / 0.1);
+  --sobre-destaque: #ffffff;
+  --vermelho: #ff3b30;
+  --vermelho-suave: rgb(255 59 48 / 0.12);
+  --laranja: #ff9500;
+  --laranja-suave: rgb(255 149 0 / 0.14);
+  --verde: #34c759;
+
+  --texto: #1c1f24;
+  --texto-2: #5d6470;
+  --texto-3: #8a909b;
+  --linha: rgb(30 40 60 / 0.09);
+  --realce: rgb(30 40 60 / 0.06); /* hover */
+
+  --fundo: #f5f6f8;
+  --superficie: #ffffff;
+  /* Translúcido: deixa ver o material Mica do Windows por baixo da barra lateral. */
+  --lateral: rgb(236 239 244 / 0.5);
+  --topo: color-mix(in srgb, var(--fundo) 82%, transparent);
+  --veu: rgb(10 15 25 / 0.18);
+  --toast: #1c1f24;
+  --sobre-toast: #f5f6f8;
+
+  /* Forma */
+  --raio-p: 10px;
+  --raio-m: 14px;
+  --raio-g: 20px;
+  --borda: 1px solid var(--linha);
+
+  /* Sombras por tamanho */
+  --sombra-p: 0 1px 2px rgb(20 30 50 / 0.06), 0 1px 3px rgb(20 30 50 / 0.06);
+  --sombra-m: 0 4px 12px rgb(20 30 50 / 0.08), 0 1px 3px rgb(20 30 50 / 0.06);
+  --sombra-g: 0 24px 60px rgb(20 30 50 / 0.18), 0 2px 8px rgb(20 30 50 / 0.08);
+
+  /* Tipografia */
+  --fonte: 'Segoe UI Variable Display', 'Segoe UI Variable Text', system-ui;
+  --fonte-texto: 'Segoe UI Variable Text', 'Segoe UI Variable Display', system-ui;
+  /* tamanho/altura-de-linha + tracking */
+  --t-display: 2.5rem/1.05;
+  --t-display-tracking: -0.02em;
+  --t-titulo: 1.5rem/1.15;
+  --t-titulo-tracking: -0.015em;
+  --t-corpo: 0.9375rem/1.45;
+  --t-corpo-tracking: 0;
+  --t-legenda: 0.8125rem/1.35;
+  --t-legenda-tracking: 0.01em;
+
+  /* Espaçamento */
+  --e-1: 4px;
+  --e-2: 8px;
+  --e-3: 12px;
+  --e-4: 16px;
+  --e-5: 22px;
+  --e-6: 28px;
+
+  /* Movimento */
+  --pressao: 100ms ease-out;
+  --suave: 120ms ease;
+
+  --largura-lateral: 240px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --destaque: #0a84ff;
+    --destaque-suave: rgb(10 132 255 / 0.16);
+    --vermelho: #ff453a;
+    --vermelho-suave: rgb(255 69 58 / 0.16);
+    --laranja: #ff9f0a;
+    --laranja-suave: rgb(255 159 10 / 0.16);
+    --verde: #30d158;
+
+    --texto: #f1f2f4;
+    --texto-2: #a8adb7;
+    --texto-3: #7d828c;
+    --linha: rgb(255 255 255 / 0.08);
+    --realce: rgb(255 255 255 / 0.06);
+
+    --fundo: #1a1b1e;
+    --superficie: #232428;
+    --lateral: rgb(32 34 40 / 0.45);
+    --veu: rgb(0 0 0 / 0.35);
+    --toast: #f1f2f4;
+    --sobre-toast: #1a1b1e;
+
+    --sombra-p: 0 1px 2px rgb(0 0 0 / 0.3);
+    --sombra-m: 0 4px 12px rgb(0 0 0 / 0.35), 0 1px 3px rgb(0 0 0 / 0.3);
+    --sombra-g: 0 24px 60px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.4);
+  }
+}
+
+/* Sem transparências: superfícies sólidas. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --lateral: #eceff4;
+    --topo: var(--fundo);
+  }
+}
+@media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) {
+  :root {
+    --lateral: #202228;
+  }
+}
+
+/* Mais contraste: bordas definidas. */
+@media (prefers-contrast: more) {
+  :root {
+    --linha: var(--texto-2);
+    --borda: 1px solid var(--texto-2);
+  }
+}
