@@ -18,6 +18,7 @@ import type {
   Motorista,
   MotoristaInput,
   MultaInput,
+  MultaItem,
   Painel,
   Plano,
   PlanoInput,
@@ -111,6 +112,13 @@ export const marcarReembolsado = (id: number, data: string) =>
 
 export const identificarCondutor = (id: number, motoristaId: number, data: string) =>
   invoke<void>('identificar_condutor', { id, motoristaId, data })
+
+/** Multas (mais recentes primeiro), filtradas por carro e/ou motorista. */
+export const multasListar = (carroId?: number | null, motoristaId?: number | null) =>
+  invoke<MultaItem[]>('multas_listar', {
+    carroId: carroId ?? null,
+    motoristaId: motoristaId ?? null,
+  })
 
 export const multasMotorista = (motoristaId: number) =>
   invoke<ResumoMultasMotorista>('multas_motorista', { motoristaId })

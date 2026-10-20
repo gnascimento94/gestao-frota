@@ -12,7 +12,7 @@ import {
   pagarDocumento,
   relatorio,
 } from '../api/comandos'
-import type { Carro, HistoricoItem, TipoLancamento } from '../api/tipos'
+import type { Carro, EstadoMulta, HistoricoItem, TipoLancamento } from '../api/tipos'
 import type { Ecra } from '../App'
 import { Botao } from '../ui/Botao'
 import { CampoSelecao } from '../ui/Campo'
@@ -23,8 +23,7 @@ import { useDesfazer } from '../ui/useDesfazer'
 import { formatarData, formatarEuros, formatarKm } from '../util/formato'
 import { AcaoData } from './AcaoData'
 import { FormCarro } from './Carros'
-import { ROTULO_CATEGORIA, ROTULO_ESTADO, estadoDaMulta, hoje, paraErroApi, useCarregar, type EstadoMulta } from './comum'
-import '../estilo/ecras.css'
+import { ROTULO_CATEGORIA, ROTULO_ESTADO, ROTULO_ESTADO_MULTA, hoje, paraErroApi, useCarregar } from './comum'
 
 type Separador = 'historico' | 'manutencao' | 'pneu' | 'documento' | 'multa' | 'motoristas' | 'km'
 
@@ -39,15 +38,13 @@ const SEPARADORES: [Separador, string][] = [
 ]
 
 const SEVERIDADE_MULTA: Partial<Record<EstadoMulta, Severidade>> = {
-  'por identificar condutor': 'vencido',
-  'por pagar': 'proximo',
-  'por reembolsar': 'proximo',
+  porIdentificarCondutor: 'vencido',
+  porPagar: 'proximo',
+  porReembolsar: 'proximo',
 }
 
 interface Dados {
   carro: Carro
-  gastoAno: number
-  gastoTotal: number
   porCategoria: [string, number][]
   itens: HistoricoItem[]
   atribuicoes: Awaited<ReturnType<typeof atribuicoesListar>>
@@ -58,8 +55,8 @@ interface FichaProps {
   id: number
   ano: number
   onNavegar(e: Ecra): void
-  /** Abre a folha "Lançar" existente. */
-  onLancar(origem: DOMRect | null): void
+  /** Abre a folha "Lançar" existente, indicando o carro de origem. */
+  onLancar(origem: DOMRect | null, carroId?: number): void
 }
 
 export function FichaCarro({ id, ano, onNavegar, onLancar }: FichaProps) {
@@ -73,19 +70,16 @@ export function FichaCarro({ id, ano, onNavegar, onLancar }: FichaProps) {
   const { agendar } = useDesfazer()
 
   const buscar = useCallback(async (): Promise<Dados> => {
-    const [carro, rAno, rTotal, itens, atribuicoes, motoristas] = await Promise.all([
+    const [carro, rAno, itens, atribuicoes, motoristas] = await Promise.all([
       carroObter(id, ano),
       relatorio({ de: `${ano}-01-01`, ate: `${ano}-12-31`, carroIds: [id] }),
-      relatorio({ de: '2000-01-01', ate: '2099-12-31', carroIds: [id] }),
       historico(id, 1000),
       atribuicoesListar(id, null),
       motoristasListar(true),
     ])
     return {
       carro,
-      gastoAno: rAno.resumo.total,
-      gastoTotal: rTotal.resumo.total,
-      porCategoria: Object.entries(rTotal.resumo.porCategoria).filter(([, v]) => (v ?? 0) !== 0) as [
+      porCategoria: Object.entries(rAno.resumo.porCategoria).filter(([, v]) => (v ?? 0) !== 0) as [
         string,
         number,
       ][],
@@ -167,7 +161,7 @@ export function FichaCarro({ id, ano, onNavegar, onLancar }: FichaProps) {
           </div>
         </div>
         <div className="ficha-acoes">
-          <Botao variante="primario" onClick={(e) => onLancar(e.currentTarget.getBoundingClientRect())}>
+          <Botao variante="primario" onClick={(e) => onLancar(e.currentTarget.getBoundingClientRect(), carro.id)}>
             + Lançar
           </Botao>
           <Botao
@@ -198,19 +192,28 @@ export function FichaCarro({ id, ano, onNavegar, onLancar }: FichaProps) {
       <div className="metricas">
         <div className="metrica">
           <div className="metrica-rotulo">Gasto total</div>
-          <div className="metrica-valor">{formatarEuros(dados.gastoTotal)}</div>
+          <div className="metrica-valor">{formatarEuros(carro.gastoTotal)}</div>
         </div>
         <div className="metrica">
           <div className="metrica-rotulo">Gasto em {ano}</div>
-          <div className="metrica-valor">{formatarEuros(dados.gastoAno)}</div>
+          <div className="metrica-valor">{formatarEuros(carro.gastoAno)}</div>
         </div>
         {dados.porCategoria.map(([cat, valor]) => (
           <div className="metrica" key={cat}>
-            <div className="metrica-rotulo">{ROTULO_CATEGORIA[cat] ?? cat}</div>
+            <div className="metrica-rotulo">{ROTULO_CATEGORIA[cat] ?? cat} em {ano}</div>
             <div className="metrica-valor">{formatarEuros(valor)}</div>
           </div>
         ))}
       </div>
+
+      <dl className="detalhes-carro" aria-label="Dados do carro">
+        {carro.ano != null && <Detalhe rotulo="Ano" valor={String(carro.ano)} />}
+        {carro.cor && <Detalhe rotulo="Cor" valor={carro.cor} />}
+        {carro.dataAquisicao && <Detalhe rotulo="Adquirido em" valor={formatarData(carro.dataAquisicao)} />}
+        <Detalhe rotulo="KM iniciais" valor={formatarKm(carro.kmInicial)} />
+        {carro.dataSaida && <Detalhe rotulo="Saída" valor={formatarData(carro.dataSaida)} />}
+        {carro.notas && <Detalhe rotulo="Notas" valor={carro.notas} />}
+      </dl>
 
       <div className="separadores" role="tablist" aria-label="Secções da ficha">
         {SEPARADORES.map(([chave, nome]) => (
@@ -272,24 +275,29 @@ function LinhaItem({
   onApagar(): void
   onAlterado(): void
 }) {
-  const multa = item.tipo === 'multa' ? estadoDaMulta(item.detalhe) : null
-  const porPagar = item.tipo === 'documento' && !!item.detalhe?.includes('vence a')
-  const detalheTexto = multa ? multa.resto : item.detalhe
-  const partes = [formatarData(item.data), item.km != null ? formatarKm(item.km) : null, detalheTexto]
+  const multaEstado = item.estadoMulta
+  const partes = [
+    formatarData(item.data),
+    item.km != null ? formatarKm(item.km) : null,
+    item.detalhe,
+    item.porPagar && item.vencimento ? `vence a ${formatarData(item.vencimento)}` : null,
+  ]
     .filter(Boolean)
     .join(' · ')
 
   return (
     <ItemLista
-      severidade={multa?.estado ? (SEVERIDADE_MULTA[multa.estado] ?? null) : null}
+      severidade={multaEstado ? (SEVERIDADE_MULTA[multaEstado] ?? null) : null}
       titulo={item.titulo}
       detalhe={partes}
       fim={
         <span className="item-fim">
-          {multa?.estado && (
-            <Pilula severidade={SEVERIDADE_MULTA[multa.estado] ?? 'proximo'}>{multa.estado}</Pilula>
+          {multaEstado && (
+            <Pilula severidade={SEVERIDADE_MULTA[multaEstado] ?? 'proximo'}>
+              {ROTULO_ESTADO_MULTA[multaEstado]}
+            </Pilula>
           )}
-          {porPagar && (
+          {item.tipo === 'documento' && item.porPagar && (
             <AcaoData
               rotulo="Marcar como pago"
               rotuloData="Pago em"
@@ -299,7 +307,7 @@ function LinhaItem({
               }}
             />
           )}
-          {multa?.estado === 'por reembolsar' && (
+          {multaEstado === 'porReembolsar' && (
             <AcaoData
               rotulo="Marcar reembolsado"
               rotuloData="Reembolsado em"
@@ -319,6 +327,14 @@ function LinhaItem({
   )
 }
 
+function Detalhe({ rotulo, valor }: { rotulo: string; valor: string }) {
+  return (
+    <div>
+      <dt>{rotulo}</dt>
+      <dd>{valor}</dd>
+    </div>
+  )
+}
 function SeparadorMotoristas({
   dados,
   carroId,

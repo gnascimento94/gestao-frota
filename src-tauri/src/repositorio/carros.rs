@@ -1,7 +1,7 @@
 use super::consultas::{despesas, periodo_ano};
 use super::{contar, data_opt, erro, fmt_data, leituras, nao_encontrado, texto};
 use crate::erro::Res;
-use crate::regras::gastos::{Despesa, resumir};
+use crate::regras::gastos::{Despesa, Periodo, resumir};
 use crate::regras::km::km_atual;
 use crate::regras::matricula::normalizar_matricula;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -26,6 +26,8 @@ pub struct Carro {
     pub motorista_atual: Option<(i64, String)>,
     /// Cêntimos gastos no ano pedido.
     pub gasto_ano: i64,
+    /// Cêntimos gastos desde sempre.
+    pub gasto_total: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -71,7 +73,16 @@ fn ler(r: &rusqlite::Row) -> rusqlite::Result<Carro> {
         notas: r.get(10)?,
         motorista_atual: mot.zip(nome),
         gasto_ano: 0,
+        gasto_total: 0,
     })
+}
+
+/// Período que cobre qualquer data possível nos registos.
+fn desde_sempre() -> Periodo {
+    Periodo {
+        de: chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("data válida"),
+        ate: chrono::NaiveDate::from_ymd_opt(9999, 12, 31).expect("data válida"),
+    }
 }
 
 fn completar(conn: &Connection, c: &mut Carro, todas: &[Despesa], ano: i32) -> Res<()> {
@@ -82,6 +93,7 @@ fn completar(conn: &Connection, c: &mut Carro, todas: &[Despesa], ano: i32) -> R
         .copied()
         .collect();
     c.gasto_ano = resumir(&minhas, &periodo_ano(ano)?).total;
+    c.gasto_total = resumir(&minhas, &desde_sempre()).total;
     Ok(())
 }
 
@@ -124,7 +136,7 @@ pub fn guardar_carro(conn: &Connection, c: &CarroInput) -> Res<i64> {
         && s < a
     {
         return Err(erro(
-            "data_invalida",
+            "data_saida_invalida",
             "A data de saída não pode ser anterior à data de aquisição.",
         ));
     }

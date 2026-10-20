@@ -1,7 +1,9 @@
 // Utilitários partilhados pelos ecrãs de carros e motoristas.
+// Estados e alertas (multas, cartas, documentos por pagar) vêm do núcleo em Rust já calculados;
+// aqui não se reimplementa nenhuma regra.
 
 import { useCallback, useEffect, useState } from 'react'
-import type { ErroApi, EstadoCarro } from '../api/tipos'
+import type { ErroApi, EstadoCarro, EstadoMulta } from '../api/tipos'
 
 const dois = (n: number) => String(n).padStart(2, '0')
 
@@ -10,15 +12,6 @@ export function hoje(): string {
   const d = new Date()
   return `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`
 }
-
-/** Data daqui a `dias` dias como "AAAA-MM-DD". */
-export function emDias(dias: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + dias)
-  return `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`
-}
-
-export const anoAtual = () => new Date().getFullYear()
 
 /** Minúsculas, sem hífens nem espaços: "AA-12-BB" e "aa 12" comparam-se bem. */
 export function normalizar(texto: string): string {
@@ -34,13 +27,14 @@ export function paraErroApi(e: unknown): ErroApi {
   return { codigo: 'desconhecido', mensagem: typeof e === 'string' ? e : 'Ocorreu um erro inesperado.' }
 }
 
-export type CampoErro = 'matricula' | 'data' | 'km' | 'valor' | 'geral'
+export type CampoErro = 'matricula' | 'data' | 'dataSaida' | 'km' | 'valor' | 'ano' | 'geral'
 
 /** Mapa `codigo → campo` dos erros de validação do núcleo. */
 export function campoDoErro(codigo: string): CampoErro {
   if (codigo.startsWith('matricula_')) return 'matricula'
+  if (codigo === 'data_saida_invalida') return 'dataSaida'
   if (codigo.startsWith('data_')) return 'data'
-  if (codigo === 'km_abaixo') return 'km'
+  if (codigo === 'km_abaixo' || codigo === 'km_invalido') return 'km'
   if (codigo === 'valor_invalido') return 'valor'
   return 'geral' // referencia_invalida, so_consulta, …
 }
@@ -95,30 +89,9 @@ export const ROTULO_ESTADO: Record<EstadoCarro, string> = {
   vendido: 'Vendido',
 }
 
-/** O núcleo escreve o estado da multa no início do detalhe do histórico. */
-const ESTADOS_MULTA = [
-  'por identificar condutor',
-  'por pagar',
-  'por reembolsar',
-  'fechada',
-] as const
-export type EstadoMulta = (typeof ESTADOS_MULTA)[number]
-
-export function estadoDaMulta(detalhe: string | null): { estado: EstadoMulta | null; resto: string | null } {
-  if (!detalhe) return { estado: null, resto: null }
-  for (const estado of ESTADOS_MULTA) {
-    if (detalhe === estado) return { estado, resto: null }
-    if (detalhe.startsWith(`${estado} · `)) return { estado, resto: detalhe.slice(estado.length + 3) }
-  }
-  return { estado: null, resto: detalhe }
+export const ROTULO_ESTADO_MULTA: Record<EstadoMulta, string> = {
+  porIdentificarCondutor: 'Por identificar condutor',
+  porPagar: 'Por pagar',
+  porReembolsar: 'Por reembolsar',
+  fechada: 'Fechada',
 }
-
-
-/** Alerta visual da validade da carta: vencida, ou a vencer nos próximos 60 dias. */
-export function estadoCarta(validade: string | null): 'vencido' | 'proximo' | null {
-  if (!validade) return null
-  if (validade < hoje()) return 'vencido'
-  if (validade <= emDias(60)) return 'proximo'
-  return null
-}
-

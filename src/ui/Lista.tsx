@@ -22,9 +22,11 @@ export interface ItemListaProps {
   fim?: ReactNode
   /** Torna a linha um botão. */
   onClick?: () => void
+  /** Destaca a linha escolhida. */
+  selecionado?: boolean
 }
 
-export function ItemLista({ severidade, inicio, titulo, detalhe, fim, onClick }: ItemListaProps) {
+export function ItemLista({ severidade, inicio, titulo, detalhe, fim, onClick, selecionado }: ItemListaProps) {
   const conteudo = (
     <>
       {severidade && <i className={`faixa faixa-${severidade}`} aria-hidden="true" />}
@@ -37,9 +39,14 @@ export function ItemLista({ severidade, inicio, titulo, detalhe, fim, onClick }:
     </>
   )
   return (
-    <li className="item-lista">
+    <li className={selecionado ? 'item-lista item-selecionado' : 'item-lista'}>
       {onClick ? (
-        <button type="button" className="item-corpo item-clicavel" onClick={onClick}>
+        <button
+          type="button"
+          className="item-corpo item-clicavel"
+          onClick={onClick}
+          aria-current={selecionado ? 'true' : undefined}
+        >
           {conteudo}
         </button>
       ) : (

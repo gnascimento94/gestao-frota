@@ -88,7 +88,8 @@ pub fn carro_apagar(e: E<'_>, id: i64) -> Res<()> {
 
 #[tauri::command(async)]
 pub fn motoristas_listar(e: E<'_>, so_ativos: bool) -> Res<Vec<Motorista>> {
-    e.ler(|c| motoristas::listar_motoristas(c, so_ativos))
+    let h = hoje();
+    e.ler(|c| motoristas::listar_motoristas(c, so_ativos, h))
 }
 
 #[tauri::command(async)]
@@ -195,6 +196,16 @@ pub fn identificar_condutor(e: E<'_>, id: i64, motorista_id: i64, data: String) 
 pub fn multas_motorista(e: E<'_>, motorista_id: i64) -> Res<ResumoMultasMotorista> {
     let h = hoje();
     e.ler(|c| multas::multas_motorista(c, motorista_id, h))
+}
+
+/// Multas (mais recentes primeiro), filtradas por carro e/ou motorista.
+#[tauri::command(async)]
+pub fn multas_listar(
+    e: E<'_>,
+    carro_id: Option<i64>,
+    motorista_id: Option<i64>,
+) -> Res<Vec<multas::MultaItem>> {
+    e.ler(|c| multas::multas_listar(c, carro_id, motorista_id))
 }
 
 // ---------- histórico ----------

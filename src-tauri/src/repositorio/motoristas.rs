@@ -2,6 +2,7 @@ use super::{
     Tabela, col_data, col_data_opt, contar, data_opt, erro, existe, fmt_data, nao_encontrado, texto,
 };
 use crate::erro::Res;
+use crate::regras::alertas::{Nivel, nivel_carta};
 use crate::regras::gastos;
 use chrono::NaiveDate;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -17,6 +18,8 @@ pub struct Motorista {
     pub carta_validade: Option<String>,
     pub ativo: bool,
     pub notas: Option<String>,
+    /// Alerta da carta (mesma regra do painel); sempre `None` para motoristas inativos.
+    pub alerta_carta: Option<Nivel>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,21 +55,28 @@ pub struct FiltroAtribuicoes {
     pub motorista_id: Option<i64>,
 }
 
-pub fn listar_motoristas(conn: &Connection, so_ativos: bool) -> Res<Vec<Motorista>> {
+pub fn listar_motoristas(
+    conn: &Connection,
+    so_ativos: bool,
+    hoje: NaiveDate,
+) -> Res<Vec<Motorista>> {
     let mut st = conn.prepare(
         "SELECT id, nome, telefone, carta_numero, carta_validade, ativo, notas FROM motoristas
          WHERE (?1 = 0 OR ativo = 1) ORDER BY nome COLLATE NOCASE, id",
     )?;
     let v = st
         .query_map([so_ativos], |r| {
+            let ativo: bool = r.get(5)?;
+            let validade = col_data_opt(r, 4)?;
             Ok(Motorista {
                 id: r.get(0)?,
                 nome: r.get(1)?,
                 telefone: r.get(2)?,
                 carta_numero: r.get(3)?,
                 carta_validade: r.get(4)?,
-                ativo: r.get(5)?,
+                ativo,
                 notas: r.get(6)?,
+                alerta_carta: validade.filter(|_| ativo).and_then(|v| nivel_carta(v, hoje)),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

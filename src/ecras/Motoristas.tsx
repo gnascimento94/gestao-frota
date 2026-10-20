@@ -1,15 +1,15 @@
 import { useCallback, useState, type FormEvent } from 'react'
 import {
   atribuicoesListar,
-  historico,
   marcarReembolsado,
   motoristaApagar,
   motoristaGuardar,
   motoristasListar,
+  multasListar,
   multasMotorista,
   relatorio,
 } from '../api/comandos'
-import type { HistoricoItem, Motorista, MotoristaInput } from '../api/tipos'
+import type { Motorista, MotoristaInput } from '../api/tipos'
 import { Botao } from '../ui/Botao'
 import { Campo } from '../ui/Campo'
 import { Cartao } from '../ui/Cartao'
@@ -17,8 +17,7 @@ import { CabecalhoFolha, Folha } from '../ui/Folha'
 import { ItemLista, Lista, Matricula, Pilula, Valor } from '../ui/Lista'
 import { formatarData, formatarEuros } from '../util/formato'
 import { AcaoData } from './AcaoData'
-import { errosDe, estadoCarta, estadoDaMulta, paraErroApi, useCarregar, type ErrosCampos } from './comum'
-import '../estilo/ecras.css'
+import { errosDe, paraErroApi, useCarregar, type ErrosCampos } from './comum'
 
 function FormMotorista({
   motorista,
@@ -138,13 +137,14 @@ export function Motoristas({ ano }: { ano: number }) {
           ) : (
             <Lista rotulo="Motoristas">
               {(dados ?? []).map((m) => {
-                const carta = estadoCarta(m.cartaValidade)
+                const carta = m.alertaCarta
                 return (
                   <ItemLista
                     key={m.id}
                     titulo={m.nome}
                     detalhe={m.telefone ?? undefined}
                     onClick={() => setSelecionado(m.id)}
+                    selecionado={m.id === selecionado}
                     fim={
                       <span className="item-fim">
                         {!m.ativo && <span className="pilula pilula-neutra">Inativo</span>}
@@ -213,24 +213,17 @@ function FichaMotorista({
   const [erroGeral, setErroGeral] = useState<string | null>(null)
 
   const buscar = useCallback(async () => {
-    const [gasto, multas, atribuicoes] = await Promise.all([
+    const [gasto, multas, atribuicoes, lista] = await Promise.all([
       relatorio({ de: `${ano}-01-01`, ate: `${ano}-12-31`, motoristaId: motorista.id }),
       multasMotorista(motorista.id),
       atribuicoesListar(null, motorista.id),
+      multasListar(null, motorista.id),
     ])
-    // Multas por reembolsar: as dos carros e períodos em que este motorista conduziu.
-    let porReembolsar: HistoricoItem[] = []
-    if (multas.porReembolsar > 0) {
-      const carros = [...new Set(atribuicoes.map((a) => a.carroId))]
-      const listas = await Promise.all(carros.map((c) => historico(c, 1000)))
-      porReembolsar = listas.flat().filter((i) => {
-        if (i.tipo !== 'multa' || estadoDaMulta(i.detalhe).estado !== 'por reembolsar') return false
-        return atribuicoes.some((a) => a.carroId === i.carroId && i.data >= a.de && (!a.ate || i.data <= a.ate))
-      })
-    }
+    // O estado de cada multa vem do núcleo; a lista concorda com o total "por reembolsar".
+    const porReembolsar = lista.filter((x) => x.estadoMulta === 'porReembolsar')
     return { gastoAno: gasto.resumo.total, multas, atribuicoes, porReembolsar }
   }, [ano, motorista.id])
-  const { dados, recarregar } = useCarregar(buscar)
+  const { dados, erro, recarregar } = useCarregar(buscar)
 
   async function apagar() {
     setAviso(null)
@@ -263,11 +256,16 @@ function FichaMotorista({
     }
   }
 
-  const carta = estadoCarta(motorista.cartaValidade)
+  const carta = motorista.alertaCarta
   const m = dados?.multas
 
   return (
     <div className="conteudo" style={{ padding: 0 }}>
+      {erro && (
+        <p className="form-erro" role="alert">
+          {erro}
+        </p>
+      )}
       <Cartao
         titulo={motorista.nome}
         acao={
@@ -347,11 +345,11 @@ function FichaMotorista({
               <ItemLista
                 key={i.id}
                 inicio={<Matricula>{i.matricula}</Matricula>}
-                titulo={i.titulo}
-                detalhe={formatarData(i.data)}
+                titulo={`Multa (${i.infracao})`}
+                detalhe={`${formatarData(i.dataInfracao)} · a reembolsar ${formatarEuros(i.valorColaborador)}`}
                 fim={
                   <span className="item-fim">
-                    {i.valor != null && <Valor>{formatarEuros(i.valor)}</Valor>}
+                    <Valor>{formatarEuros(i.valor)}</Valor>
                     <AcaoData
                       rotulo="Marcar reembolsado"
                       rotuloData="Reembolsado em"

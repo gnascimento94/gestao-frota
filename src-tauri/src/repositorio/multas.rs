@@ -43,6 +43,97 @@ pub struct ResumoMultasMotorista {
     pub pontos_3_anos: i64,
 }
 
+/// Estado de uma multa. Calculado num único sítio (`ESTADO_MULTA_SQL`) para que o histórico,
+/// a lista de multas e o resumo do motorista concordem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EstadoMulta {
+    PorIdentificarCondutor,
+    PorPagar,
+    PorReembolsar,
+    Fechada,
+}
+
+impl EstadoMulta {
+    pub(crate) fn de_sql(s: &str) -> Option<Self> {
+        match s {
+            "porIdentificarCondutor" => Some(Self::PorIdentificarCondutor),
+            "porPagar" => Some(Self::PorPagar),
+            "porReembolsar" => Some(Self::PorReembolsar),
+            "fechada" => Some(Self::Fechada),
+            _ => None,
+        }
+    }
+}
+
+/// Fragmento SQL (sobre a tabela `multas`) que devolve o estado como texto.
+pub(crate) const ESTADO_MULTA_SQL: &str = "CASE
+    WHEN motorista_id IS NULL THEN 'porIdentificarCondutor'
+    WHEN pago_em IS NULL THEN 'porPagar'
+    WHEN empresa_adiantou = 1 AND reembolsado_em IS NULL AND valor_empresa < valor
+        THEN 'porReembolsar'
+    ELSE 'fechada' END";
+
+/// Multa tal como é mostrada nas listas.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultaItem {
+    pub id: i64,
+    pub carro_id: i64,
+    pub matricula: String,
+    pub data_infracao: String,
+    pub infracao: String,
+    pub pontos: i64,
+    pub valor: i64,
+    pub valor_empresa: i64,
+    pub valor_colaborador: i64,
+    pub estado_multa: EstadoMulta,
+    /// Condutor identificado.
+    pub motorista_id: Option<i64>,
+    pub vencimento: Option<String>,
+    pub descricao: Option<String>,
+}
+
+/// Multas (mais recentes primeiro), filtradas por carro e/ou motorista.
+pub fn multas_listar(
+    conn: &Connection,
+    carro_id: Option<i64>,
+    motorista_id: Option<i64>,
+) -> Res<Vec<MultaItem>> {
+    let sql = format!(
+        "SELECT m.id, m.carro_id, c.matricula, m.data_infracao, m.infracao, m.pontos, m.valor,
+                m.valor_empresa, m.motorista_id, m.vencimento, m.descricao,
+                {ESTADO_MULTA_SQL}
+         FROM multas m JOIN carros c ON c.id = m.carro_id
+         WHERE (?1 IS NULL OR m.carro_id = ?1) AND (?2 IS NULL OR m.motorista_id = ?2)
+         ORDER BY m.data_infracao DESC, m.id DESC"
+    );
+    let mut st = conn.prepare(&sql)?;
+    let v = st
+        .query_map(params![carro_id, motorista_id], |r| {
+            let valor: i64 = r.get(6)?;
+            let valor_empresa: i64 = r.get(7)?;
+            let estado: String = r.get(11)?;
+            Ok(MultaItem {
+                id: r.get(0)?,
+                carro_id: r.get(1)?,
+                matricula: r.get(2)?,
+                data_infracao: r.get(3)?,
+                infracao: r.get(4)?,
+                pontos: r.get(5)?,
+                valor,
+                valor_empresa,
+                valor_colaborador: valor - valor_empresa,
+                estado_multa: EstadoMulta::de_sql(&estado).unwrap_or(EstadoMulta::Fechada),
+                motorista_id: r.get(8)?,
+                vencimento: r.get(9)?,
+                descricao: r.get(10)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(v)
+}
+
 const INFRACOES: [&str; 8] = [
     "velocidade",
     "estacionamento",
@@ -229,13 +320,16 @@ pub fn multas_motorista(
         .checked_sub_months(Months::new(36))
         .map(fmt_data)
         .unwrap_or_default();
-    Ok(conn.query_row(
+    let sql = format!(
         "SELECT COUNT(*), COALESCE(SUM(valor), 0), COALESCE(SUM(valor_empresa), 0),
             COALESCE(SUM(valor - valor_empresa), 0),
-            COALESCE(SUM(CASE WHEN empresa_adiantou = 1 AND reembolsado_em IS NULL
+            COALESCE(SUM(CASE WHEN {ESTADO_MULTA_SQL} = 'porReembolsar'
                 THEN valor - valor_empresa ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN data_infracao >= ?2 THEN pontos ELSE 0 END), 0)
-         FROM multas WHERE motorista_id = ?1",
+         FROM multas WHERE motorista_id = ?1"
+    );
+    Ok(conn.query_row(
+        &sql,
         params![motorista_id, limite],
         |r| {
             Ok(ResumoMultasMotorista {

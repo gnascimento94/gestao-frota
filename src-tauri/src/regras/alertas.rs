@@ -191,12 +191,17 @@ pub fn alertas_documentos(docs: &[DocAlerta], hoje: NaiveDate) -> Vec<Alerta> {
         .collect()
 }
 
+/// Nível do alerta de uma carta de condução (60 dias); `None` se ainda não é de assinalar.
+pub fn nivel_carta(validade: NaiveDate, hoje: NaiveDate) -> Option<Nivel> {
+    nivel_prazo(dias(validade, hoje), DIAS_CARTA)
+}
+
 pub fn alertas_cartas(c: &[CartaAlerta], hoje: NaiveDate) -> Vec<Alerta> {
     c.iter()
         .filter_map(|carta| {
             let falta = dias(carta.validade, hoje);
             Some(Alerta {
-                nivel: nivel_prazo(falta, DIAS_CARTA)?,
+                nivel: nivel_carta(carta.validade, hoje)?,
                 tipo: TipoAlerta::Carta,
                 carro_id: None,
                 motorista_id: Some(carta.motorista_id),

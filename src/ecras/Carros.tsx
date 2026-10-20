@@ -8,7 +8,6 @@ import { CabecalhoFolha, Folha } from '../ui/Folha'
 import { Matricula, Pilula } from '../ui/Lista'
 import { formatarEuros, formatarKm } from '../util/formato'
 import { ROTULO_ESTADO, errosDe, normalizar, useCarregar, type ErrosCampos } from './comum'
-import '../estilo/ecras.css'
 
 interface FormCarroProps {
   /** Se existir, edita este carro. */
@@ -40,8 +39,8 @@ export function FormCarro({ carro, onGuardado, onCancelar }: FormCarroProps) {
       return
     }
     const anoNum = ano.trim() === '' ? null : Number(ano)
-    if (anoNum !== null && !Number.isInteger(anoNum)) {
-      setErros({ geral: 'O ano do carro tem de ser um número.' })
+    if (anoNum !== null && !/^\d{4}$/.test(ano.trim())) {
+      setErros({ ano: 'Indique o ano com 4 algarismos, por exemplo 2019.' })
       return
     }
     const input: CarroInput = {
@@ -95,6 +94,7 @@ export function FormCarro({ carro, onGuardado, onCancelar }: FormCarroProps) {
             inputMode="numeric"
             value={ano}
             onChange={(e) => setAno(e.target.value)}
+            erro={erros.ano}
           />
           <Campo rotulo="Cor" value={cor} onChange={(e) => setCor(e.target.value)} />
         </div>
@@ -131,6 +131,7 @@ export function FormCarro({ carro, onGuardado, onCancelar }: FormCarroProps) {
                 type="date"
                 value={dataSaida}
                 onChange={(e) => setDataSaida(e.target.value)}
+                erro={erros.dataSaida}
               />
             )}
           </div>
@@ -228,38 +229,29 @@ export function Carros({ ano, pesquisa, onAbrir }: CarrosProps) {
               </thead>
               <tbody>
                 {visiveis.map((c) => (
-                  <tr key={c.id}>
+                  <tr key={c.id} onClick={() => onAbrir(c.id)}>
                     <td>
-                      <button type="button" onClick={() => onAbrir(c.id)}>
+                      <button
+                        type="button"
+                        className="linha-botao"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onAbrir(c.id)
+                        }}
+                      >
                         <Matricula>{c.matricula}</Matricula>
-                        {c.estado !== 'ativo' && (
-                          <>
-                            {' '}
-                            <Pilula severidade="proximo">{ROTULO_ESTADO[c.estado]}</Pilula>
-                          </>
-                        )}
                       </button>
+                      {c.estado !== 'ativo' && (
+                        <>
+                          {' '}
+                          <Pilula severidade="proximo">{ROTULO_ESTADO[c.estado]}</Pilula>
+                        </>
+                      )}
                     </td>
-                    <td>
-                      <button type="button" onClick={() => onAbrir(c.id)}>
-                        {[c.marca, c.modelo].filter(Boolean).join(' ') || '—'}
-                      </button>
-                    </td>
-                    <td className="num">
-                      <button type="button" onClick={() => onAbrir(c.id)}>
-                        {formatarKm(c.kmAtual)}
-                      </button>
-                    </td>
-                    <td>
-                      <button type="button" onClick={() => onAbrir(c.id)}>
-                        {c.motoristaAtual ? c.motoristaAtual[1] : <span className="esmaecido">—</span>}
-                      </button>
-                    </td>
-                    <td className="num">
-                      <button type="button" onClick={() => onAbrir(c.id)}>
-                        {formatarEuros(c.gastoAno)}
-                      </button>
-                    </td>
+                    <td>{[c.marca, c.modelo].filter(Boolean).join(' ') || '—'}</td>
+                    <td className="num">{formatarKm(c.kmAtual)}</td>
+                    <td>{c.motoristaAtual ? c.motoristaAtual[1] : <span className="esmaecido">—</span>}</td>
+                    <td className="num">{formatarEuros(c.gastoAno)}</td>
                   </tr>
                 ))}
               </tbody>

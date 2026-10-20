@@ -55,6 +55,8 @@ export interface Carro {
   motoristaAtual: [number, string] | null
   /** Cêntimos gastos no ano pedido. */
   gastoAno: number
+  /** Cêntimos gastos desde sempre. */
+  gastoTotal: number
 }
 
 export interface CarroInput {
@@ -81,6 +83,8 @@ export interface Motorista {
   cartaValidade: string | null
   ativo: boolean
   notas: string | null
+  /** Alerta da carta (regra do painel); null se não há alerta ou o motorista está inativo. */
+  alertaCarta: Nivel | null
 }
 
 export interface MotoristaInput {
@@ -190,6 +194,24 @@ export interface MultaInput {
   descricao?: string | null
 }
 
+export type EstadoMulta = 'porIdentificarCondutor' | 'porPagar' | 'porReembolsar' | 'fechada'
+
+export interface MultaItem {
+  id: number
+  carroId: number
+  matricula: string
+  dataInfracao: string
+  infracao: string
+  pontos: number
+  valor: number
+  valorEmpresa: number
+  valorColaborador: number
+  estadoMulta: EstadoMulta
+  motoristaId: number | null
+  vencimento: string | null
+  descricao: string | null
+}
+
 export interface ResumoMultasMotorista {
   n: number
   total: number
@@ -211,6 +233,14 @@ export interface HistoricoItem {
   titulo: string
   valor: number | null
   detalhe: string | null
+  /** Documento ainda por pagar. */
+  porPagar: boolean
+  /** Prazo de pagamento (documentos e multas). */
+  vencimento: string | null
+  /** Multas: condutor identificado. */
+  motoristaId: number | null
+  /** Só nas multas. */
+  estadoMulta: EstadoMulta | null
 }
 
 // ---------- tipos e planos ----------

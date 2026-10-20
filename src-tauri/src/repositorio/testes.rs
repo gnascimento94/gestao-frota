@@ -7,7 +7,7 @@ use super::motoristas::*;
 use super::multas::*;
 use super::planos::*;
 use crate::migracoes::migrar;
-use crate::regras::alertas::{Limiares, TipoAlerta};
+use crate::regras::alertas::{Limiares, Nivel, TipoAlerta};
 use crate::regras::gastos::Categoria;
 use chrono::NaiveDate;
 use rusqlite::Connection;
@@ -358,18 +358,109 @@ fn adiantamento_fica_por_reembolsar_ate_marcar() {
     assert_eq!(r.empresa, 4_000);
     assert_eq!(r.colaborador, 8_000);
     assert_eq!(r.por_reembolsar, 8_000);
-    // o histórico indica o estado da multa
+    // o histórico e a lista de multas concordam com o resumo
     let h = historico(&c, Some(a), 10).unwrap();
-    assert_eq!(h[0].detalhe.as_deref(), Some("por reembolsar"));
+    assert_eq!(h[0].estado_multa, Some(EstadoMulta::PorReembolsar));
+    let l = multas_listar(&c, None, Some(ana)).unwrap();
+    assert_eq!(l[0].estado_multa, EstadoMulta::PorReembolsar);
+    assert_eq!(l[0].valor_colaborador, 8_000);
     marcar_reembolsado(&c, id, d(2026, 10, 1), hoje()).unwrap();
     assert_eq!(multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar, 0);
     let h = historico(&c, Some(a), 10).unwrap();
-    assert_eq!(h[0].detalhe.as_deref(), Some("fechada"));
+    assert_eq!(h[0].estado_multa, Some(EstadoMulta::Fechada));
     // sem adiantamento não há nada por reembolsar
     let mut sem = multa(a, Some(ana), "2026-09-02", 5_000, "colaborador");
     sem.empresa_adiantou = false;
     guardar_multa(&mut c, &sem, hoje()).unwrap();
     assert_eq!(multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar, 0);
+}
+
+#[test]
+fn estado_da_multa_nos_quatro_casos() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let ana = motorista(&c, "Ana");
+    // sem condutor
+    let m = multa(a, None, "2026-09-01", 6_000, "empresa");
+    let sem_condutor = guardar_multa(&mut c, &m, hoje()).unwrap();
+    // com condutor, por pagar
+    let m = multa(a, Some(ana), "2026-09-02", 6_000, "empresa");
+    let por_pagar = guardar_multa(&mut c, &m, hoje()).unwrap();
+    // paga pela empresa por conta do colaborador, sem reembolso
+    let mut m = multa(a, Some(ana), "2026-09-03", 6_000, "colaborador");
+    m.pago_em = Some("2026-09-10".into());
+    m.empresa_adiantou = true;
+    let por_reembolsar = guardar_multa(&mut c, &m, hoje()).unwrap();
+    // paga e sem pendências
+    let mut m = multa(a, Some(ana), "2026-09-04", 6_000, "empresa");
+    m.pago_em = Some("2026-09-10".into());
+    let fechada = guardar_multa(&mut c, &m, hoje()).unwrap();
+
+    let esperado = [
+        (sem_condutor, EstadoMulta::PorIdentificarCondutor),
+        (por_pagar, EstadoMulta::PorPagar),
+        (por_reembolsar, EstadoMulta::PorReembolsar),
+        (fechada, EstadoMulta::Fechada),
+    ];
+    let lista = multas_listar(&c, Some(a), None).unwrap();
+    let hist = historico(&c, Some(a), 50).unwrap();
+    for (id, estado) in esperado {
+        assert_eq!(lista.iter().find(|x| x.id == id).unwrap().estado_multa, estado);
+        let h = hist.iter().find(|x| x.tipo == "multa" && x.id == id).unwrap();
+        assert_eq!(h.estado_multa, Some(estado));
+    }
+    // o filtro por motorista só traz as multas dele; a por identificar não aparece
+    assert_eq!(multas_listar(&c, None, Some(ana)).unwrap().len(), 3);
+    // a métrica "por reembolsar" concorda com as linhas
+    let somatorio: i64 = multas_listar(&c, None, Some(ana))
+        .unwrap()
+        .iter()
+        .filter(|x| x.estado_multa == EstadoMulta::PorReembolsar)
+        .map(|x| x.valor_colaborador)
+        .sum();
+    assert_eq!(multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar, somatorio);
+    assert_eq!(somatorio, 6_000);
+}
+
+#[test]
+fn alerta_da_carta_so_para_motoristas_ativos() {
+    let c = bd();
+    let mk = |nome: &str, validade: &str, ativo: bool| {
+        guardar_motorista(
+            &c,
+            &MotoristaInput {
+                id: None,
+                nome: nome.into(),
+                telefone: None,
+                carta_numero: None,
+                carta_validade: Some(validade.into()),
+                ativo,
+                notas: None,
+            },
+        )
+        .unwrap()
+    };
+    mk("Vencida", "2026-10-19", true);
+    mk("Proxima", "2026-12-19", true); // 60 dias
+    mk("Longe", "2026-12-20", true); // 61 dias
+    mk("Inativa", "2026-10-01", false);
+    let v = listar_motoristas(&c, false, hoje()).unwrap();
+    let nivel = |n: &str| v.iter().find(|m| m.nome == n).unwrap().alerta_carta;
+    assert_eq!(nivel("Vencida"), Some(Nivel::Vencido));
+    assert_eq!(nivel("Proxima"), Some(Nivel::Proximo));
+    assert_eq!(nivel("Longe"), None);
+    assert_eq!(nivel("Inativa"), None);
+}
+
+#[test]
+fn carro_traz_gasto_total() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    lancar_manutencao(&mut c, &manut(a, "2025-03-01", None), hoje()).unwrap();
+    lancar_manutencao(&mut c, &manut(a, "2026-03-01", None), hoje()).unwrap();
+    let r = obter_carro(&c, a, 2026).unwrap();
+    assert_eq!(r.gasto_total, 2 * r.gasto_ano);
+    assert!(r.gasto_ano > 0);
 }
 
 #[test]
@@ -573,7 +664,9 @@ fn pagar_iuc_anual_nao_poe_o_seguinte_no_topo_dos_recentes() {
         .find(|x| x.tipo == "documento" && x.id == novo)
         .unwrap();
     assert_eq!(gerado.data, hoje.to_string()); // data de registo
-    assert_eq!(gerado.detalhe.as_deref(), Some("vence a 2027-05-31"));
+    assert_eq!(gerado.detalhe, None);
+    assert!(gerado.por_pagar);
+    assert_eq!(gerado.vencimento.as_deref(), Some("2027-05-31"));
     let pago = r
         .iter()
         .find(|x| x.tipo == "documento" && x.id == id)
@@ -673,7 +766,7 @@ fn referencias_inexistentes_e_data_de_saida() {
     let mut i = carro_input("CC-34-DD");
     i.data_aquisicao = Some("2026-03-01".into());
     i.data_saida = Some("2026-02-28".into());
-    assert_eq!(guardar_carro(&c, &i).unwrap_err().codigo, "data_invalida");
+    assert_eq!(guardar_carro(&c, &i).unwrap_err().codigo, "data_saida_invalida");
     i.data_saida = Some("2026-03-01".into());
     guardar_carro(&c, &i).unwrap();
 }

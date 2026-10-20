@@ -618,6 +618,10 @@ time {
   background: var(--realce);
 }
 
+.item-selecionado .item-corpo {
+  background: var(--destaque-suave);
+}
+
 .item-clicavel:focus-visible {
   outline-offset: -2px;
 }

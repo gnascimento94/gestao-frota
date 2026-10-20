@@ -111,6 +111,7 @@ pub fn run() {
             comandos::atualizar_km,
             comandos::pagar_documento,
             comandos::apagar_lancamento,
+            comandos::multas_listar,
             comandos::historico,
             comandos::tipos_listar,
             comandos::tipo_guardar,

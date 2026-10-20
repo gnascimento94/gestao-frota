@@ -39,18 +39,20 @@ export default function App() {
 
 function Concha() {
   const [ecra, setEcra] = useState<Ecra>({ nome: 'inicio' })
-  const [lancar, setLancar] = useState<{ aberta: boolean; origem: DOMRect | null }>({
-    aberta: false,
-    origem: null,
-  })
+  const [lancar, setLancar] = useState<{
+    aberta: boolean
+    origem: DOMRect | null
+    /** Carro de onde foi aberta (para a Tarefa 11 o pré-selecionar). */
+    carroId: number | null
+  }>({ aberta: false, origem: null, carroId: null })
   const [pesquisa, setPesquisa] = useState('')
   const gravacao = useEstadoArmazenamento()
   const refLancar = useRef<HTMLButtonElement>(null)
   const refPesquisa = useRef<HTMLInputElement>(null)
   const refPrincipal = useRef<HTMLElement>(null)
 
-  const abrirLancar = useCallback((origem: DOMRect | null) => {
-    setLancar({ aberta: true, origem })
+  const abrirLancar = useCallback((origem: DOMRect | null, carroId?: number) => {
+    setLancar({ aberta: true, origem, carroId: carroId ?? null })
   }, [])
   const fecharLancar = useCallback(() => setLancar((l) => ({ ...l, aberta: false })), [])
 

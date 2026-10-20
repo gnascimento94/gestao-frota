@@ -4,7 +4,6 @@ import type { Ecra } from '../App'
 import { Cartao } from '../ui/Cartao'
 import { FormCarro } from './Carros'
 import { useCarregar } from './comum'
-import '../estilo/ecras.css'
 
 /** Primeira execução: convida a registar o primeiro carro. */
 export function BoasVindas({ onCriado }: { onCriado(id: number): void }) {
@@ -33,7 +32,14 @@ export function InicioOuBoasVindas({
   children: ReactNode
 }) {
   const buscar = useCallback(() => carrosListar(false, ano), [ano])
-  const { dados, recarregar } = useCarregar(buscar)
+  const { dados, erro, recarregar } = useCarregar(buscar)
+  if (erro && dados === null) {
+    return (
+      <p className="form-erro" role="alert">
+        {erro}
+      </p>
+    )
+  }
   if (dados === null) return null
   if (dados.length === 0) {
     return (

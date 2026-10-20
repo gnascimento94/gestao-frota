@@ -43,8 +43,9 @@
 }
 
 .tabela td {
-  padding: 0;
+  padding: 12px 18px;
   border-top: var(--borda);
+  font-variant-numeric: tabular-nums;
 }
 
 .tabela tr:first-child td {
@@ -55,25 +56,26 @@
   text-align: right;
 }
 
-.tabela td > button {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  width: 100%;
-  text-align: inherit;
-  padding: 12px 18px;
+.tabela tbody tr {
   cursor: pointer;
-  font-variant-numeric: tabular-nums;
 }
 
 .tabela tbody tr:hover td {
   background: var(--realce);
 }
 
-.tabela td > button:focus-visible {
-  outline-offset: -2px;
+.linha-botao {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
 }
 
+.linha-botao:focus-visible {
+  outline-offset: 3px;
+  border-radius: 6px;
+}
 .tabela .esmaecido {
   color: var(--texto-3);
 }
@@ -315,6 +317,20 @@
   }
 }
 
-.item-selecionado .item-corpo {
-  background: var(--destaque-suave);
+
+.detalhes-carro {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--e-3);
+  font-size: 0.875rem;
+}
+
+.detalhes-carro dt {
+  font-size: 0.75rem;
+  color: var(--texto-3);
+}
+
+.detalhes-carro dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
 }
