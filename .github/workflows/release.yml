@@ -1,0 +1,90 @@
+# Publica uma versão: em cada tag vX.Y.Z compila o Frota.exe, assina-o e cria a
+# Release com Frota.exe + latest.json (lido pela atualização automática da app).
+#
+# Secrets necessários (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           conteúdo de %USERPROFILE%\.tauri\frota.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  palavra-passe da chave (pode não existir: chave sem palavra-passe)
+#
+# latest.json: { versao, notas, url, sha256 (hex minúsculas), assinatura }
+# `assinatura` é o conteúdo de Frota.exe.sig escrito pelo `tauri signer sign`: base64 de
+# uma assinatura minisign, ligada à versão (`--app-version`). Ver src-tauri/src/atualizacao/mod.rs.
+
+name: Publicar versão
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Versão a partir da tag
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $versao = $tag.Substring(1)
+          if ($versao -notmatch '^\d+\.\d+\.\d+$') { throw "Tag inválida: $tag (esperado vX.Y.Z)" }
+          $conf = 'src-tauri/tauri.conf.json'
+          $json = Get-Content -Raw $conf | ConvertFrom-Json
+          $json.version = $versao
+          $json | ConvertTo-Json -Depth 32 | Set-Content -Encoding utf8NoBOM $conf
+          $cargo = 'src-tauri/Cargo.toml'
+          $texto = Get-Content -Raw $cargo
+          # só a primeira linha `version = ...` (a do [package])
+          $texto = ([regex]'(?m)^version = "[^"]*"').Replace($texto, "version = `"$versao`"", 1)
+          Set-Content -Encoding utf8NoBOM -NoNewline $cargo $texto
+          "VERSAO=$versao" >> $env:GITHUB_ENV
+          "TAG=$tag" >> $env:GITHUB_ENV
+
+      - run: npm ci
+
+      - name: Compilar
+        run: npm run tauri build -- --no-bundle
+
+      - name: Assinar
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          Copy-Item src-tauri/target/release/frota.exe Frota.exe
+          npx tauri signer sign --app-version $env:VERSAO Frota.exe
+          if (-not (Test-Path Frota.exe.sig)) { throw 'Assinatura não criada' }
+
+      - name: Gerar latest.json
+        run: |
+          $notas = (git tag -l --format='%(contents)' $env:TAG | Out-String).Trim()
+          if (-not $notas) { $notas = "Versão $env:VERSAO" }
+          $latest = [ordered]@{
+            versao     = $env:VERSAO
+            notas      = $notas
+            url        = "https://github.com/${{ github.repository }}/releases/download/$env:TAG/Frota.exe"
+            sha256     = (Get-FileHash Frota.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            assinatura = (Get-Content -Raw Frota.exe.sig).Trim()
+          }
+          $latest | ConvertTo-Json | Set-Content -Encoding utf8NoBOM latest.json
+          Get-Content latest.json
+          Set-Content -Encoding utf8NoBOM notas.md $notas
+
+      - name: Criar Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:TAG Frota.exe latest.json --title "Frota $env:VERSAO" --notes-file notas.md

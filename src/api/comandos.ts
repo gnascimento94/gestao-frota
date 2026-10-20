@@ -19,6 +19,7 @@ import type {
   MotoristaInput,
   MultaInput,
   MultaItem,
+  NovaVersao,
   Painel,
   Plano,
   PlanoInput,
@@ -49,6 +50,14 @@ export const fazerCopia = () => invoke<void>('fazer_copia')
 export const listarVersoes = () => invoke<Versao[]>('listar_versoes')
 
 export const restaurarVersao = (nome: string) => invoke<void>('restaurar_versao', { nome })
+
+// ---------- atualização ----------
+
+/** Versão mais recente no GitHub, ou `null` (sem internet, em consulta, em desenvolvimento…). */
+export const verificarAtualizacao = () => invoke<NovaVersao | null>('verificar_atualizacao')
+
+/** Descarrega, valida, grava os dados e reinicia na versão nova. Só volta em caso de erro. */
+export const aplicarAtualizacao = () => invoke<void>('aplicar_atualizacao')
 
 // ---------- carros ----------
 

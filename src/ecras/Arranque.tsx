@@ -159,7 +159,8 @@ function Corrompido({ onRestaurada }: { onRestaurada(): void }) {
   )
 }
 
-function EcraArranque({
+/** Cartão centrado com o logo (ecrãs de arranque e de atualização). */
+export function EcraArranque({
   titulo,
   erro,
   botoes,

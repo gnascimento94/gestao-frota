@@ -30,6 +30,12 @@ export interface EstadoArmazenamento {
   versaoApp: string
 }
 
+/** Versão mais recente publicada no GitHub (`verificarAtualizacao`). */
+export interface NovaVersao {
+  versao: string
+  notas: string
+}
+
 export interface Versao {
   nome: string
   /** "AAAA-MM-DD" ou "AAAA-MM-DD HH:MM". */

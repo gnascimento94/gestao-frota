@@ -4,7 +4,8 @@
 //! Os comandos correm fora da thread principal (`async`) para não bloquear a janela.
 
 use crate::armazenamento::versoes::Versao;
-use crate::erro::Res;
+use crate::atualizacao;
+use crate::erro::{Erro, Res};
 use crate::estado::{Arranque, Estado, EstadoArmazenamento};
 use crate::regras::alertas::Limiares;
 use crate::repositorio::carros::{self, Carro, CarroInput};
@@ -18,6 +19,7 @@ use crate::repositorio::multas::{self, MultaInput, ResumoMultasMotorista};
 use crate::repositorio::planos::{self, Plano, PlanoInput, TipoManutencao};
 use crate::repositorio::{config, data as ler_data};
 use chrono::{Local, NaiveDate, NaiveDateTime};
+use serde::Serialize;
 use tauri::State;
 
 fn hoje() -> NaiveDate {
@@ -68,6 +70,59 @@ pub fn listar_versoes(e: E<'_>) -> Res<Vec<Versao>> {
 #[tauri::command(async)]
 pub fn restaurar_versao(e: E<'_>, nome: String) -> Res<()> {
     e.restaurar_versao(&nome, agora())
+}
+
+// ---------- atualização ----------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NovaVersao {
+    pub versao: String,
+    pub notas: String,
+}
+
+/// Há versão mais recente no GitHub? `None` em desenvolvimento, em modo
+/// consulta, sem internet (timeout 5 s) ou em qualquer erro.
+#[tauri::command(async)]
+pub fn verificar_atualizacao(e: E<'_>) -> Option<NovaVersao> {
+    if cfg!(debug_assertions) || e.so_consulta() {
+        return None;
+    }
+    let l = atualizacao::verificar(env!("CARGO_PKG_VERSION"))?;
+    log::info!("atualização disponível: {}", l.versao);
+    Some(NovaVersao { versao: l.versao, notas: l.notas })
+}
+
+/// Descarrega e valida `Frota.new.exe`, grava os dados, faz a cópia
+/// `frota_antes-da-vX.Y.Z.db`, troca os executáveis e reinicia. Qualquer falha
+/// apaga `Frota.new.exe` e devolve o erro; a app continua na versão atual.
+///
+/// Tem de correr fora da thread principal (`async`): assim `restart` pede a
+/// saída ao ciclo de eventos, que corre `ExitRequested`/`Exit` (o `fechar` em
+/// `lib.rs` grava e liberta o `frota.lock`; o plugin single-instance liberta o
+/// seu mutex) antes de lançar o novo processo — que não é engolido como
+/// "segunda instância". `current_exe()` devolve o caminho com que o processo
+/// arrancou (`Frota.exe`), que já é a versão nova.
+#[tauri::command(async)]
+pub fn aplicar_atualizacao(app: tauri::AppHandle, e: E<'_>) -> Res<()> {
+    if cfg!(debug_assertions) || e.so_consulta() {
+        return Err(Erro {
+            campo: None,
+            codigo: "atualizacao_indisponivel".into(),
+            mensagem: "A atualização automática não está disponível neste modo.".into(),
+        });
+    }
+    let exe = std::env::current_exe()?;
+    let (l, novo) = atualizacao::preparar(&exe, env!("CARGO_PKG_VERSION"))?;
+    let r = e
+        .gravar_antes_de_atualizar(&l.versao, agora())
+        .and_then(|()| atualizacao::trocar_exe(&exe, &novo));
+    if let Err(err) = r {
+        let _ = std::fs::remove_file(&novo);
+        log::warn!("atualização abortada: {}", err.mensagem);
+        return Err(err);
+    }
+    log::info!("atualizado para {}; a reiniciar", l.versao);
+    app.restart()
 }
 
 // ---------- carros ----------

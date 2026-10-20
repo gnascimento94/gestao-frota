@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 mod armazenamento;
+mod atualizacao;
 mod comandos;
 #[allow(dead_code)]
 mod erro;
@@ -76,6 +77,24 @@ pub fn run() {
                 Estado::arrancar(&raiz(), &local(), &nome_pc(), Local::now().naive_local());
             log::info!("arranque: {arranque:?}");
             app.manage(estado);
+            // Depois de uma atualização: apagar `Frota.old.exe`. O processo antigo
+            // pode ainda estar a terminar (ficheiro em uso), por isso tenta-se
+            // algumas vezes em segundo plano.
+            if let Ok(exe) = std::env::current_exe() {
+                // Já, antes de qualquer descarga (também apaga um `Frota.new.exe` esquecido).
+                atualizacao::limpar_old(&exe);
+                let old = exe.with_file_name(atualizacao::NOME_OLD);
+                if old.exists() {
+                    std::thread::spawn(move || {
+                        for _ in 0..10 {
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            if std::fs::remove_file(&old).is_ok() || !old.exists() {
+                                break;
+                            }
+                        }
+                    });
+                }
+            }
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
@@ -91,6 +110,8 @@ pub fn run() {
             comandos::fazer_copia,
             comandos::listar_versoes,
             comandos::restaurar_versao,
+            comandos::verificar_atualizacao,
+            comandos::aplicar_atualizacao,
             comandos::carros_listar,
             comandos::carro_obter,
             comandos::carro_guardar,

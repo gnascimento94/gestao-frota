@@ -9,3 +9,10 @@ dist-ssr
 !.vscode/extensions.json
 .superpowers/
 Logo.cdr
+
+# chaves de assinatura (a privada fica em %USERPROFILE%\.tauri)
+*.key
+!src-tauri/tests/fixtures/*.key
+# atualizacao
+Frota.new.exe
+Frota.old.exe

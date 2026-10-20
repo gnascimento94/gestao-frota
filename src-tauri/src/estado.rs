@@ -551,6 +551,32 @@ impl Estado {
         primeiro.map_or(Ok(()), Err)
     }
 
+    /// Antes de trocar o executável: grava (com a verificação de conflito de
+    /// `gravar_com`) e faz `frota_antes-da-v{versao}.db`. Qualquer erro (incluindo
+    /// `conflito`) aborta a atualização; o lock e os dados continuam abertos.
+    pub fn gravar_antes_de_atualizar(&self, versao: &str, agora: NaiveDateTime) -> Res<()> {
+        if self.so_consulta.load(Ordering::SeqCst) {
+            return Err(erro_so_consulta());
+        }
+        let g = trava(&self.conn);
+        let conn = g.as_ref().ok_or_else(sem_dados)?;
+        if self.fechado.load(Ordering::SeqCst) || self.so_consulta.load(Ordering::SeqCst) {
+            return Err(erro_so_consulta());
+        }
+        // Mesmo sem alterações por gravar: se outro PC gravou, não seguir.
+        if self.alterado_fora() {
+            return Err(self.entrar_em_conflito(conn, agora));
+        }
+        if self.sujo.load(Ordering::SeqCst) || self.pendente() {
+            self.gravar_com(conn, agora)?;
+        }
+        versoes::copia_antes_de(&self.caminhos, versao)
+    }
+
+    pub fn so_consulta(&self) -> bool {
+        self.so_consulta.load(Ordering::SeqCst)
+    }
+
     pub fn armazenamento(&self) -> EstadoArmazenamento {
         EstadoArmazenamento {
             pasta: self.raiz.display().to_string(),
@@ -1065,6 +1091,53 @@ mod testes {
         std::fs::write(&raiz, b"nao sou uma pasta").unwrap();
         let (_e, a) = Estado::arrancar(&raiz, &local, "PC-A", t0());
         assert!(matches!(a, Arranque::SemPasta { .. }), "{a:?}");
+    }
+
+    #[test]
+    fn antes_de_atualizar_grava_e_faz_copia_antes_da() {
+        let (_t, raiz, local) = cenario();
+        let (e, _) = Estado::arrancar(&raiz, &local, "PC-A", t0());
+        inserir(&e, t0(), "AA-00-AA").unwrap(); // por gravar
+        e.gravar_antes_de_atualizar("1.3.0", s(1)).unwrap();
+        let banco = e.caminhos().banco.clone();
+        assert_eq!(carros_no_banco(&banco), 1);
+        assert!(!e.caminhos().pendente.exists());
+        let antes = raiz.join("dados").join("versoes").join("frota_antes-da-v1.3.0.db");
+        assert_eq!(carros_no_banco(&antes), 1);
+        // continua aberto normalmente (se a troca falhar, a app continua)
+        assert!(!e.armazenamento().so_consulta);
+        inserir(&e, s(2), "BB-11-BB").unwrap();
+    }
+
+    #[test]
+    fn antes_de_atualizar_com_conflito_aborta() {
+        let (_t, raiz, local) = cenario();
+        let banco = raiz.join("dados").join("frota.db");
+        let (a, _) = Estado::arrancar(&raiz, &local.join("a"), "PC-A", t0());
+        inserir(&a, t0(), "A1").unwrap();
+        a.tick(s(3));
+        inserir(&a, s(10), "A2").unwrap();
+        // outro PC gravou o banco entretanto
+        let (x, _) = Estado::arrancar(&raiz, &local.join("x"), "PC-X", s(200));
+        inserir(&x, s(200), "X1").unwrap();
+        x.fechar(s(201).date(), s(201)).unwrap();
+        let err = a.gravar_antes_de_atualizar("1.3.0", s(202)).unwrap_err();
+        assert_eq!(err.codigo, "conflito");
+        assert!(tem(&banco, "X1") && !tem(&banco, "A2"));
+        assert!(!raiz.join("dados").join("versoes").join("frota_antes-da-v1.3.0.db").exists());
+    }
+
+    #[test]
+    fn antes_de_atualizar_recusado_em_consulta() {
+        let (_t, raiz, local) = cenario();
+        {
+            let (x, _) = Estado::arrancar(&raiz, &local.join("x"), "PC-X", t0());
+            inserir(&x, t0(), "AA-00-AA").unwrap();
+            x.tick(s(3));
+        }
+        let (e, _) = Estado::arrancar(&raiz, &local.join("y"), "PC-Y", s(5));
+        e.abrir_consulta().unwrap();
+        assert_eq!(e.gravar_antes_de_atualizar("1.3.0", s(6)).unwrap_err().codigo, "so_consulta");
     }
 
     #[test]

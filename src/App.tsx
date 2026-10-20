@@ -8,6 +8,7 @@ import { Lancar } from './lancar/Lancar'
 import { InicioOuBoasVindas } from './ecras/BoasVindas'
 import { Carros } from './ecras/Carros'
 import { FichaCarro } from './ecras/FichaCarro'
+import { VerificarAtualizacao } from './ecras/Atualizando'
 import { Backup } from './ecras/Backup'
 import { Inicio } from './ecras/Inicio'
 import { Motoristas } from './ecras/Motoristas'
@@ -34,10 +35,13 @@ const TITULOS: Record<Ecra['nome'], string> = {
 }
 
 export default function App() {
+  // Só chega aqui depois de um arranque com os dados abertos (ver `Arranque`).
   return (
-    <DesfazerProvider>
-      <Concha />
-    </DesfazerProvider>
+    <VerificarAtualizacao>
+      <DesfazerProvider>
+        <Concha />
+      </DesfazerProvider>
+    </VerificarAtualizacao>
   )
 }
 

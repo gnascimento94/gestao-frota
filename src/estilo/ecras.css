@@ -931,3 +931,32 @@
 .tipos-erro {
   margin: 0 18px 10px;
 }
+/* Atualização ao abrir */
+
+.atualizando {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+}
+
+.atualizando-indicador {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid var(--destaque-suave);
+  border-top-color: var(--destaque);
+  animation: atualizando-girar 0.9s linear infinite;
+}
+
+@keyframes atualizando-girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atualizando-indicador {
+    animation-duration: 2.4s;
+  }
+}
