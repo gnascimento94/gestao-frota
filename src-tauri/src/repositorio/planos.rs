@@ -86,6 +86,18 @@ pub fn guardar_tipo(conn: &Connection, id: Option<i64>, nome: &str) -> Res<i64> 
     }
 }
 
+/// Ativa ou desativa um tipo de manutenção (os lançamentos e planos existentes mantêm-se).
+pub fn definir_tipo_ativo(conn: &Connection, id: i64, ativo: bool) -> Res<()> {
+    let n = conn.execute(
+        "UPDATE tipos_manutencao SET ativo = ?1, atualizado_em = datetime('now') WHERE id = ?2",
+        params![ativo, id],
+    )?;
+    if n == 0 {
+        return Err(nao_encontrado());
+    }
+    Ok(())
+}
+
 pub fn listar_planos(conn: &Connection) -> Res<Vec<Plano>> {
     let mut st = conn.prepare(
         "SELECT p.id, p.tipo_id, t.nome, p.cada_km, p.cada_meses, p.todos_carros

@@ -5,12 +5,15 @@ import './estilo/base.css'
 import './estilo/ecras.css'
 import './estilo/lancar.css'
 import App from './App.tsx'
+import { Arranque } from './ecras/Arranque'
 import { marcarSemMica } from './util/mica'
 
 void marcarSemMica()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <Arranque>
+      <App />
+    </Arranque>
   </StrictMode>,
 )

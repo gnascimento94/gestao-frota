@@ -63,7 +63,13 @@ function FormMotorista({
             {erros.geral}
           </p>
         )}
-        <Campo rotulo="Nome" value={nome} onChange={(e) => setNome(e.target.value)} data-foco-inicial />
+        <Campo
+          rotulo="Nome"
+          value={nome}
+          onChange={(e) => setNome(e.target.value)}
+          erro={erros.nome}
+          data-foco-inicial
+        />
         <Campo rotulo="Telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} />
         <div className="form-par">
           <Campo rotulo="N.º da carta" value={cartaNumero} onChange={(e) => setCartaNumero(e.target.value)} />

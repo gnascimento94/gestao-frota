@@ -54,6 +54,9 @@ pub struct EstadoArmazenamento {
     /// ISO local (`AAAA-MM-DDTHH:MM:SS`).
     pub ultima_gravacao: Option<String>,
     pub erro: Option<String>,
+    /// Aviso do arranque (alterações deste PC guardadas em Backup por conflito).
+    /// Fica até ser dispensado (`dispensar_aviso`); as gravações não o apagam.
+    pub aviso_arranque: Option<String>,
     pub so_consulta: bool,
     pub versao_app: String,
 }
@@ -65,6 +68,8 @@ pub struct Estado {
     so_consulta: AtomicBool,
     ultima_gravacao: Mutex<Option<NaiveDateTime>>,
     erro_gravacao: Mutex<Option<String>>,
+    /// Ver `EstadoArmazenamento::aviso_arranque`.
+    aviso_arranque: Mutex<Option<String>>,
     sujo: AtomicBool,
     raiz: PathBuf,
     pc: String,
@@ -149,6 +154,7 @@ impl Estado {
             so_consulta: AtomicBool::new(false),
             ultima_gravacao: Mutex::new(None),
             erro_gravacao: Mutex::new(None),
+            aviso_arranque: Mutex::new(None),
             sujo: AtomicBool::new(false),
             raiz: raiz.to_path_buf(),
             pc: pc.to_string(),
@@ -164,7 +170,7 @@ impl Estado {
     /// Cria as pastas, adquire o lock e prepara a cópia de trabalho.
     pub fn arrancar(raiz: &Path, local: &Path, pc: &str, agora: NaiveDateTime) -> (Estado, Arranque) {
         let e = Estado::novo(raiz, local, pc);
-        let a = e.iniciar(agora);
+        let a = e.iniciar(&mut trava(&e.conn), agora);
         *trava(&e.arranque) = a.clone();
         (e, a)
     }
@@ -208,7 +214,8 @@ impl Estado {
 
     // ---------- arranque ----------
 
-    fn iniciar(&self, agora: NaiveDateTime) -> Arranque {
+    /// Requer: quem chama segura `conn` (passada em `slot`, vazia).
+    fn iniciar(&self, slot: &mut Option<Connection>, agora: NaiveDateTime) -> Arranque {
         let c = &self.caminhos;
         let pastas = std::fs::create_dir_all(&c.dados).and_then(|_| match c.trabalho.parent() {
             Some(p) => std::fs::create_dir_all(p),
@@ -242,15 +249,15 @@ impl Estado {
         }
         match gravacao::preparar_trabalho(c) {
             Ok(conn) => {
-                self.instalar(&mut trava(&self.conn), conn, l, agora);
+                self.instalar(slot, conn, l, agora);
                 if aviso.is_some() {
-                    *trava(&self.erro_gravacao) = aviso;
+                    *trava(&self.aviso_arranque) = aviso;
                 }
                 Arranque::Ok
             }
             Err(e) => {
                 if aviso.is_some() {
-                    *trava(&self.erro_gravacao) = aviso;
+                    *trava(&self.aviso_arranque) = aviso;
                 }
                 let _ = l.libertar();
                 match e.codigo.as_str() {
@@ -290,6 +297,28 @@ impl Estado {
 
     pub fn arranque(&self) -> Arranque {
         trava(&self.arranque).clone()
+    }
+
+    /// "Tentar de novo": depois de um arranque `Bloqueado` ou `SemPasta` (sem
+    /// dados abertos, nem em consulta) volta a tentar arrancar; nos outros casos
+    /// devolve o estado atual.
+    pub fn tentar_arranque(&self, agora: NaiveDateTime) -> Arranque {
+        let mut g = trava(&self.conn);
+        let atual = self.arranque();
+        let repetir = g.is_none()
+            && !self.fechado.load(Ordering::SeqCst)
+            && matches!(atual, Arranque::Bloqueado { .. } | Arranque::SemPasta { .. });
+        if !repetir {
+            return atual;
+        }
+        let a = self.iniciar(&mut g, agora);
+        *trava(&self.arranque) = a.clone();
+        a
+    }
+
+    /// O utilizador fechou o aviso do arranque.
+    pub fn dispensar_aviso(&self) {
+        *trava(&self.aviso_arranque) = None;
     }
 
     #[cfg(test)]
@@ -529,6 +558,7 @@ impl Estado {
             ultima_gravacao: trava(&self.ultima_gravacao)
                 .map(|d| d.format("%Y-%m-%dT%H:%M:%S").to_string()),
             erro: trava(&self.erro_gravacao).clone(),
+            aviso_arranque: trava(&self.aviso_arranque).clone(),
             so_consulta: self.so_consulta.load(Ordering::SeqCst),
             versao_app: env!("CARGO_PKG_VERSION").to_string(),
         }
@@ -886,9 +916,10 @@ mod testes {
         assert_eq!(versao_com(&raiz, "A2").as_deref(), Some("frota_2026-10-20_1205.db"));
         let est = a2.armazenamento();
         assert_eq!(
-            est.erro.as_deref(),
+            est.aviso_arranque.as_deref(),
             Some(format!("{MSG_CONFLITO}20/10 12:05). Feche e volte a abrir o sistema.").as_str())
         );
+        assert_eq!(est.erro, None);
         assert!(!est.so_consulta);
         assert!(!local.join("a").join("pendente").exists());
         // trabalha a partir do banco do PC-X
@@ -896,6 +927,66 @@ mod testes {
             .ler(|c| Ok(c.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))?))
             .unwrap();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn aviso_de_arranque_fica_ate_ser_dispensado() {
+        let (_t, raiz, local) = cenario();
+        let (a, _) = Estado::arrancar(&raiz, &local.join("a"), "PC-A", t0());
+        inserir(&a, t0(), "A1").unwrap();
+        a.tick(s(3));
+        inserir(&a, s(10), "A2").unwrap(); // por gravar
+        let (x, _) = Estado::arrancar(&raiz, &local.join("x"), "PC-X", s(200));
+        inserir(&x, s(200), "X1").unwrap();
+        x.fechar(s(201).date(), s(201)).unwrap();
+        drop(a);
+        let (a2, _) = Estado::arrancar(&raiz, &local.join("a"), "PC-A", s(300));
+        let esperado = format!("{MSG_CONFLITO}20/10 12:05). Feche e volte a abrir o sistema.");
+        assert_eq!(a2.armazenamento().aviso_arranque.as_deref(), Some(esperado.as_str()));
+        // uma gravação bem-sucedida não apaga o aviso
+        inserir(&a2, s(301), "A3").unwrap();
+        a2.tick(s(304));
+        assert!(tem(&raiz.join("dados").join("frota.db"), "A3"));
+        let est = a2.armazenamento();
+        assert_eq!(est.erro, None);
+        assert_eq!(est.aviso_arranque.as_deref(), Some(esperado.as_str()));
+        // só `dispensar_aviso` o apaga
+        a2.dispensar_aviso();
+        assert_eq!(a2.armazenamento().aviso_arranque, None);
+    }
+
+    #[test]
+    fn tentar_de_novo_depois_de_bloqueado() {
+        let (_t, raiz, local) = cenario();
+        let (x, _) = Estado::arrancar(&raiz, &local.join("x"), "PC-X", t0());
+        let (e, a) = Estado::arrancar(&raiz, &local.join("y"), "PC-Y", s(5));
+        assert_eq!(a, Arranque::Bloqueado { pc: "PC-X".into() });
+        // ainda bloqueado
+        assert_eq!(e.tentar_arranque(s(6)), Arranque::Bloqueado { pc: "PC-X".into() });
+        x.fechar(s(7).date(), s(7)).unwrap();
+        assert_eq!(e.tentar_arranque(s(8)), Arranque::Ok);
+        assert_eq!(e.arranque(), Arranque::Ok);
+        inserir(&e, s(9), "AA-00-AA").unwrap();
+        // já aberto: não volta a arrancar
+        assert_eq!(e.tentar_arranque(s(10)), Arranque::Ok);
+        let n: i64 = e
+            .ler(|c| Ok(c.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn tentar_de_novo_em_consulta_nao_arranca() {
+        let (_t, raiz, local) = cenario();
+        {
+            let (x, _) = Estado::arrancar(&raiz, &local.join("x0"), "PC-X", t0());
+            inserir(&x, t0(), "AA-00-AA").unwrap();
+            x.tick(s(3));
+        }
+        let (e, _) = Estado::arrancar(&raiz, &local.join("y"), "PC-Y", s(5));
+        e.abrir_consulta().unwrap();
+        assert_eq!(e.tentar_arranque(s(6)), Arranque::Bloqueado { pc: "PC-X".into() });
+        assert!(e.armazenamento().so_consulta);
     }
 
     #[test]

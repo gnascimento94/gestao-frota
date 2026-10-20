@@ -41,6 +41,9 @@ export type CampoErro =
   | 'oficina'
   | 'pontos'
   | 'ano'
+  | 'intervalo'
+  | 'carros'
+  | 'nome'
   | 'geral'
 
 /** Mapa `codigo → campo` dos erros de validação do núcleo. */
@@ -55,6 +58,9 @@ export function campoDoErro(codigo: string): CampoErro {
   if (codigo === 'coparticipacao_invalida') return 'valorEmpresa'
   if (codigo === 'falta_oficina') return 'oficina'
   if (codigo === 'pontos_invalidos') return 'pontos'
+  if (codigo === 'plano_vazio') return 'intervalo'
+  if (codigo === 'plano_sem_carros') return 'carros'
+  if (codigo === 'falta_nome' || codigo === 'tipo_duplicado') return 'nome'
   return 'geral' // referencia_invalida, so_consulta, …
 }
 

@@ -32,9 +32,17 @@ type E<'a> = State<'a, Estado>;
 
 // ---------- armazenamento ----------
 
+/// Estado do arranque. Depois de `bloqueado`/`semPasta` volta a tentar ("Tentar de novo").
 #[tauri::command(async)]
 pub fn arranque(e: E<'_>) -> Res<Arranque> {
-    Ok(e.arranque())
+    Ok(e.tentar_arranque(agora()))
+}
+
+/// Fecha o aviso do arranque (`EstadoArmazenamento::aviso_arranque`).
+#[tauri::command(async)]
+pub fn dispensar_aviso(e: E<'_>) -> Res<()> {
+    e.dispensar_aviso();
+    Ok(())
 }
 
 #[tauri::command(async)]
@@ -227,6 +235,11 @@ pub fn tipos_listar(e: E<'_>) -> Res<Vec<TipoManutencao>> {
 #[tauri::command(async)]
 pub fn tipo_guardar(e: E<'_>, id: Option<i64>, nome: String) -> Res<i64> {
     e.mutar(agora(), |c| planos::guardar_tipo(c, id, &nome))
+}
+
+#[tauri::command(async)]
+pub fn tipo_ativo(e: E<'_>, id: i64, ativo: bool) -> Res<()> {
+    e.mutar(agora(), |c| planos::definir_tipo_ativo(c, id, ativo))
 }
 
 #[tauri::command(async)]

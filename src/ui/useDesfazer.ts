@@ -6,8 +6,11 @@ export const ESPERA_DESFAZER_MS = 8000
 export const LIMITE_FECHO_MS = 4000
 
 export interface AgendarDesfazer {
-  /** Agenda `acao` para daqui a 8 s; até lá o utilizador pode desfazer. */
-  agendar(rotulo: string, acao: () => Promise<void>): void
+  /**
+   * Agenda `acao` para daqui a 8 s; até lá o utilizador pode desfazer
+   * (e, nesse caso, corre `aoDesfazer`, p.ex. para voltar a mostrar o item escondido).
+   */
+  agendar(rotulo: string, acao: () => Promise<void>, aoDesfazer?: () => void): void
 }
 
 /** O que o toast mostra: o rótulo (uma ação) ou "Apagados (N)". */

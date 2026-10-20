@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Aviso } from './ui/Aviso'
+import { dispensarAviso } from './api/comandos'
+import { Aviso, AvisoArranque } from './ui/Aviso'
 import { Barra } from './ui/Barra'
-import { Cartao } from './ui/Cartao'
 import { Desfazer, DesfazerProvider } from './ui/Desfazer'
 import { useEstadoArmazenamento } from './ui/useEstadoArmazenamento'
 import { Lancar } from './lancar/Lancar'
 import { InicioOuBoasVindas } from './ecras/BoasVindas'
 import { Carros } from './ecras/Carros'
 import { FichaCarro } from './ecras/FichaCarro'
+import { Backup } from './ecras/Backup'
 import { Inicio } from './ecras/Inicio'
 import { Motoristas } from './ecras/Motoristas'
+import { Planos } from './ecras/Planos'
 import { Relatorios } from './ecras/Relatorios'
 
 export type Ecra =
@@ -60,6 +62,13 @@ function Concha() {
   const [versao, setVersao] = useState(0)
   const recarregar = useCallback(() => setVersao((v) => v + 1), [])
   const [zonaToasts, setZonaToasts] = useState<HTMLDivElement | null>(null)
+  // Aviso do arranque fechado nesta sessão (escondido já, sem esperar pela próxima consulta).
+  const [avisoFechado, setAvisoFechado] = useState<string | null>(null)
+  const avisoArranque = gravacao.estado?.avisoArranque ?? null
+  const fecharAviso = useCallback(() => {
+    setAvisoFechado(avisoArranque)
+    dispensarAviso().catch((e: unknown) => console.error('Não foi possível fechar o aviso', e))
+  }, [avisoArranque])
 
   // Atalhos globais: Ctrl+N (lançar), Ctrl+K (pesquisar). Esc é tratado pela folha.
   useEffect(() => {
@@ -132,6 +141,7 @@ function Concha() {
           </label>
         </header>
 
+        <AvisoArranque texto={avisoArranque !== avisoFechado ? avisoArranque : null} onFechar={fecharAviso} />
         <Aviso {...gravacao} />
 
         {/* `versao` muda após cada lançamento: o ecrã visível volta a pedir os dados
@@ -164,7 +174,12 @@ function Concha() {
             </InicioOuBoasVindas>
           )}
           {ecra.nome === 'relatorios' && <Relatorios versao={versao} onNavegar={navegar} />}
-          {(ecra.nome === 'planos' || ecra.nome === 'backup') && <EcraVazio titulo={titulo} />}
+          {ecra.nome === 'planos' && (
+            <Planos ano={ano} versao={versao} soConsulta={gravacao.estado?.soConsulta ?? false} />
+          )}
+          {ecra.nome === 'backup' && (
+            <Backup estado={gravacao.estado} versao={versao} onRestaurado={recarregar} />
+          )}
         </div>
       </main>
 
@@ -185,14 +200,3 @@ function Concha() {
   )
 }
 
-/** Ecrã ainda por construir (as próximas etapas preenchem cada um). */
-function EcraVazio({ titulo }: { titulo: string }) {
-  return (
-    <Cartao>
-      <div className="vazio">
-        <strong>{titulo}</strong>
-        Este ecrã ainda está em construção.
-      </div>
-    </Cartao>
-  )
-}

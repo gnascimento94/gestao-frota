@@ -34,9 +34,13 @@ export type { ErroApi } from './tipos'
 
 // ---------- armazenamento ----------
 
+/** Estado do arranque; depois de `bloqueado`/`semPasta`, volta a tentar arrancar. */
 export const arranque = () => invoke<Arranque>('arranque')
 
 export const abrirConsulta = () => invoke<void>('abrir_consulta')
+
+/** Fecha o aviso do arranque (`EstadoArmazenamento.avisoArranque`). */
+export const dispensarAviso = () => invoke<void>('dispensar_aviso')
 
 export const estadoArmazenamento = () => invoke<EstadoArmazenamento>('estado_armazenamento')
 
@@ -137,7 +141,10 @@ export const tiposListar = () => invoke<TipoManutencao[]>('tipos_listar')
 export const tipoGuardar = (id: number | null, nome: string) =>
   invoke<number>('tipo_guardar', { id, nome })
 
-export const planosListar = () => invoke<Plano[]>('planos_listar')
+/** Ativa ou desativa um tipo de manutenção. */
+export const tipoAtivo = (id: number, ativo: boolean) => invoke<void>('tipo_ativo', { id, ativo })
+
+export const planosListar =() => invoke<Plano[]>('planos_listar')
 
 export const planoGuardar = (input: PlanoInput) => invoke<number>('plano_guardar', { input })
 

@@ -1293,3 +1293,15 @@ fn relatorio_por_reembolsar_usa_a_mesma_regra_da_ficha() {
     assert_eq!(relatorio(&c, &filtro(None)).unwrap().multas.por_reembolsar, todas);
     assert_eq!(todas, 8_000);
 }
+#[test]
+fn tipo_de_manutencao_desativa_e_reativa() {
+    let c = bd();
+    let id = guardar_tipo(&c, None, "Correia").unwrap();
+    definir_tipo_ativo(&c, id, false).unwrap();
+    let t = listar_tipos(&c).unwrap().into_iter().find(|t| t.id == id).unwrap();
+    assert!(!t.ativo);
+    definir_tipo_ativo(&c, id, true).unwrap();
+    let t = listar_tipos(&c).unwrap().into_iter().find(|t| t.id == id).unwrap();
+    assert!(t.ativo);
+    assert_eq!(definir_tipo_ativo(&c, 9999, false).unwrap_err().codigo, "nao_encontrado");
+}

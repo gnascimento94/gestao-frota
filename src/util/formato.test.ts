@@ -74,3 +74,18 @@ test('formatarHora', () => {
   expect(formatarHora('2026-10-20 09:05')).toBe('09:05')
   expect(formatarHora('2026-10-20')).toBeNull()
 })
+
+test('formatarDataHora e formatarQuando', async () => {
+  const { formatarDataHora, formatarQuando } = await import('./formato')
+  expect(formatarDataHora('2026-10-20 18:42')).toBe('20 out 2026, 18:42')
+  expect(formatarDataHora('2026-10-20T18:42:07')).toBe('20 out 2026, 18:42')
+  expect(formatarDataHora('2026-10-19')).toBe('19 out 2026')
+  const agora = new Date(2026, 9, 20, 20, 0)
+  expect(formatarQuando('2026-10-20 18:42', agora)).toBe('hoje, 18:42')
+  expect(formatarQuando('2026-10-20T18:42:07', agora)).toBe('hoje, 18:42')
+  expect(formatarQuando('2026-10-19', agora)).toBe('ontem')
+  expect(formatarQuando('2026-10-19 09:05', agora)).toBe('ontem, 09:05')
+  expect(formatarQuando('2026-10-01 09:05', agora)).toBe('1 out 2026, 09:05')
+  // virada do ano
+  expect(formatarQuando('2025-12-31 23:00', new Date(2026, 0, 1, 8, 0))).toBe('ontem, 23:00')
+})

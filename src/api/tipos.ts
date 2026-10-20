@@ -24,6 +24,8 @@ export interface EstadoArmazenamento {
   /** ISO local "AAAA-MM-DDTHH:MM:SS". */
   ultimaGravacao: string | null
   erro: string | null
+  /** Aviso do arranque (conflito com outro PC); fica até `dispensarAviso()`. */
+  avisoArranque: string | null
   soConsulta: boolean
   versaoApp: string
 }

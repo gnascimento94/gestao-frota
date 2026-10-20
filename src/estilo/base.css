@@ -860,3 +860,41 @@ time {
     transition: none;
   }
 }
+
+/* Aviso do arranque: pode ser fechado */
+
+.aviso-texto {
+  flex: 1;
+}
+
+.aviso-fechar {
+  appearance: none;
+  border: 0;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--preenchimento);
+  color: var(--texto-2);
+  cursor: pointer;
+}
+
+.aviso-fechar:hover {
+  color: var(--texto);
+}
+
+.aviso-fechar:focus-visible {
+  outline: 2px solid var(--destaque);
+  outline-offset: 2px;
+}
+
+.aviso-fechar svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}

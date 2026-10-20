@@ -29,14 +29,39 @@ export function Aviso({ estado, falhou }: EstadoGravacao) {
   if (!tom) return null
   return (
     <div className={`aviso aviso-${tom}`} role={tom === 'erro' ? 'alert' : 'status'}>
-      <svg className="aviso-icone" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3l9.5 17h-19z" />
-        <path d="M12 10v4.5M12 17.5v.01" />
-      </svg>
+      <Icone />
       <div>
         <strong>{titulo}</strong> {texto}
         {detalhe && <span className="aviso-detalhe">Detalhe: {detalhe}</span>}
       </div>
+    </div>
+  )
+}
+
+function Icone() {
+  return (
+    <svg className="aviso-icone" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3l9.5 17h-19z" />
+      <path d="M12 10v4.5M12 17.5v.01" />
+    </svg>
+  )
+}
+
+/**
+ * Aviso do arranque (p.ex. alterações deste PC guardadas em Backup por conflito com outro PC).
+ * Fica visível até o utilizador o fechar; `onFechar` chama `dispensarAviso()`.
+ */
+export function AvisoArranque({ texto, onFechar }: { texto: string | null; onFechar(): void }) {
+  if (!texto) return null
+  return (
+    <div className="aviso aviso-alerta" role="alert">
+      <Icone />
+      <div className="aviso-texto">{texto}</div>
+      <button type="button" className="aviso-fechar" aria-label="Fechar aviso" onClick={onFechar}>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4 4l8 8M12 4l-8 8" />
+        </svg>
+      </button>
     </div>
   )
 }

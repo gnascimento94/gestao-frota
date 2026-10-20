@@ -99,3 +99,25 @@ export function formatarHora(iso: string): string | null {
   const m = /^\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})/.exec(iso)
   return m ? `${m[1]}:${m[2]}` : null
 }
+
+/** `"2026-10-20 18:42"` → `"20 out 2026, 18:42"`; só data → `"20 out 2026"`. */
+export function formatarDataHora(iso: string): string {
+  const hora = formatarHora(iso)
+  return hora ? `${formatarData(iso)}, ${hora}` : formatarData(iso)
+}
+
+const dois = (n: number) => String(n).padStart(2, '0')
+const diaIso = (d: Date) => `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`
+
+/**
+ * Data (e hora) relativa a `agora`: `"hoje, 18:42"`, `"ontem, 09:05"`, `"ontem"`;
+ * mais antiga → `formatarDataHora`.
+ */
+export function formatarQuando(iso: string, agora: Date = new Date()): string {
+  const dia = iso.slice(0, 10)
+  const ontem = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate() - 1)
+  const palavra = dia === diaIso(agora) ? 'hoje' : dia === diaIso(ontem) ? 'ontem' : null
+  if (!palavra) return formatarDataHora(iso)
+  const hora = formatarHora(iso)
+  return hora ? `${palavra}, ${hora}` : palavra
+}

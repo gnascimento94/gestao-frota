@@ -24,6 +24,7 @@ import {
 interface Pendente {
   rotulo: string
   acao: () => Promise<void>
+  aoDesfazer?: () => void
   temporizador: ReturnType<typeof setTimeout>
 }
 
@@ -90,19 +91,21 @@ export function DesfazerProvider({
   }, [executar])
 
   const agendar = useCallback(
-    (rotulo: string, acao: () => Promise<void>) => {
+    (rotulo: string, acao: () => Promise<void>, aoDesfazer?: () => void) => {
       const id = proximoId.current++
       const temporizador = setTimeout(() => executar(id), ESPERA_DESFAZER_MS)
-      pendentes.current.set(id, { rotulo, acao, temporizador })
+      pendentes.current.set(id, { rotulo, acao, aoDesfazer, temporizador })
       atualizar()
     },
     [executar, atualizar],
   )
 
   const desfazerTodas = useCallback(() => {
-    for (const p of pendentes.current.values()) clearTimeout(p.temporizador)
+    const desfeitas = [...pendentes.current.values()]
+    for (const p of desfeitas) clearTimeout(p.temporizador)
     pendentes.current.clear()
     atualizar()
+    for (const p of desfeitas) p.aoDesfazer?.()
   }, [atualizar])
 
   // Ref para os handlers de saída verem sempre a versão atual.

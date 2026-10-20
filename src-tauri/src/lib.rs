@@ -86,6 +86,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             comandos::arranque,
             comandos::abrir_consulta,
+            comandos::dispensar_aviso,
             comandos::estado_armazenamento,
             comandos::fazer_copia,
             comandos::listar_versoes,
@@ -115,6 +116,7 @@ pub fn run() {
             comandos::historico,
             comandos::tipos_listar,
             comandos::tipo_guardar,
+            comandos::tipo_ativo,
             comandos::planos_listar,
             comandos::plano_guardar,
             comandos::plano_apagar,
