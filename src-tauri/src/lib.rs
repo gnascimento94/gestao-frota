@@ -1,5 +1,7 @@
 #[allow(dead_code)]
 mod erro;
+#[allow(dead_code)]
+mod migracoes;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
