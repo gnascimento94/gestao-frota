@@ -78,7 +78,7 @@ fn codigo_corrompido(f: &rusqlite::ffi::Error) -> bool {
     matches!(f.code, rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
 }
 
-fn integridade_ok(conn: &Connection) -> Res<bool> {
+pub(crate) fn integridade_ok(conn: &Connection) -> Res<bool> {
     match conn.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)) {
         Ok(r) => Ok(r == "ok"),
         Err(rusqlite::Error::SqliteFailure(f, _)) if codigo_corrompido(&f) => Ok(false),

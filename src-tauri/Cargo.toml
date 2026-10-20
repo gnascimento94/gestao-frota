@@ -23,7 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.12.4", features = [] }
 tauri-plugin-log = "2"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
 chrono = "0.4.45"
 ureq = "3.4.2"
 sha2 = "0.11.1"
