@@ -6,6 +6,8 @@ mod erro;
 mod migracoes;
 #[allow(dead_code)]
 mod regras;
+#[allow(dead_code)]
+mod repositorio;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

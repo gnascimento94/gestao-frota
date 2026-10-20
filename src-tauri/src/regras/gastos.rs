@@ -34,6 +34,7 @@ pub struct Periodo {
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Resumo {
     pub total: i64,
     pub por_categoria: BTreeMap<Categoria, i64>,

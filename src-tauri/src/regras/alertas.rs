@@ -1,5 +1,5 @@
 use chrono::{Datelike, Duration, Months, NaiveDate, Weekday};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
@@ -64,7 +64,8 @@ pub struct UltimaManutencao {
     pub km: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Limiares {
     pub km: i64,
     pub dias: i64,
