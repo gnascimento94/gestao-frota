@@ -36,8 +36,8 @@ Vitest + @testing-library/react.
 2. **Valores em euros com vírgula** (`1.234,56`, `45,5`, `45`, `45.5`) → cêntimos exatos (123456, 4550, 4500, 4550); texto inválido mostra erro no campo e não grava. Teste na Tarefa 11.
 3. **Datas impossíveis num lançamento** (data no futuro numa manutenção/pneu/KM, ou anterior à aquisição do carro) → recusado com mensagem; o vencimento de um documento pode ser futuro. Testes na Tarefa 7.
 4. **Pasta do Drive inacessível a meio da sessão** → nada se perde, aparece aviso, a gravação é retomada e o próximo arranque grava primeiro a cópia pendente. Testes nas Tarefas 2 e 8.
-6. **Coparticipação incoerente** (parte da empresa ≥ valor da multa, ou 0) e **total da oficina que não bate com peças + mão de obra** → recusado com mensagem no campo; nunca se grava uma repartição que some mais do que a multa. Testes nas Tarefas 7 e 11.
-5. **Apagar um carro ou motorista com histórico** → não é permitido; o ecrã propõe "Marcar como vendido/inativo". Apagar só é possível sem lançamentos associados. Teste na Tarefa 7.
+5. **Coparticipação incoerente** (parte da empresa ≥ valor da multa, ou 0) e **total da oficina que não bate com peças + mão de obra** → recusado com mensagem no campo; nunca se grava uma repartição que some mais do que a multa. Testes nas Tarefas 7 e 11.
+6. **Apagar um carro ou motorista com histórico** → não é permitido; o ecrã propõe "Marcar como vendido/inativo". Apagar só é possível sem lançamentos associados. Teste na Tarefa 7.
 
 ---
 
