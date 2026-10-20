@@ -1,0 +1,6 @@
+﻿dados/
+*.db
+node_modules/
+target/
+dist/
+
