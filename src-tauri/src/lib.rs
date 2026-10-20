@@ -134,6 +134,24 @@ pub fn run() {
             event: WindowEvent::Destroyed,
             ..
         } => fechar(app),
+        // Vigilante: se o handler JS nunca terminar (página bloqueada), destrói a janela
+        // ao fim de 5 s — `Destroyed` corre então `fechar` normalmente.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { .. },
+            ..
+        } => {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                if let Some(w) = app.get_webview_window(&label) {
+                    log::warn!("fecho: o frontend não respondeu em 5 s; a destruir a janela");
+                    if let Err(e) = w.destroy() {
+                        log::error!("fecho: não foi possível destruir a janela: {e}");
+                    }
+                }
+            });
+        }
         // Saída por outro caminho (p.ex. última janela destruída): `fechar` só atua uma vez.
         RunEvent::ExitRequested { .. } | RunEvent::Exit => fechar(app),
         _ => {}

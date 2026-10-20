@@ -19,11 +19,12 @@
   --texto-3: #8a909b;
   --linha: rgb(30 40 60 / 0.09);
   --realce: rgb(30 40 60 / 0.06); /* hover */
+  --preenchimento: rgb(30 40 60 / 0.07); /* fundo de botões secundários e do botão fechar */
 
   --fundo: #f5f6f8;
   --superficie: #ffffff;
   /* Translúcido: deixa ver o material Mica do Windows por baixo da barra lateral. */
-  --lateral: rgb(236 239 244 / 0.5);
+  --lateral: rgb(236 239 244 / 0.78);
   --topo: color-mix(in srgb, var(--fundo) 82%, transparent);
   --veu: rgb(10 15 25 / 0.18);
   --toast: #1c1f24;
@@ -33,12 +34,14 @@
   --raio-p: 10px;
   --raio-m: 14px;
   --raio-g: 20px;
-  --borda: 1px solid var(--linha);
+  --cor-borda: var(--linha);
+  --borda: 1px solid var(--cor-borda);
 
   /* Sombras por tamanho */
   --sombra-p: 0 1px 2px rgb(20 30 50 / 0.06), 0 1px 3px rgb(20 30 50 / 0.06);
   --sombra-m: 0 4px 12px rgb(20 30 50 / 0.08), 0 1px 3px rgb(20 30 50 / 0.06);
   --sombra-g: 0 24px 60px rgb(20 30 50 / 0.18), 0 2px 8px rgb(20 30 50 / 0.08);
+  --sombra-folha: -20px 0 60px rgb(20 30 50 / 0.18);
 
   /* Tipografia */
   --fonte: 'Segoe UI Variable Display', 'Segoe UI Variable Text', system-ui;
@@ -83,10 +86,11 @@
     --texto-3: #7d828c;
     --linha: rgb(255 255 255 / 0.08);
     --realce: rgb(255 255 255 / 0.06);
+    --preenchimento: rgb(255 255 255 / 0.1);
 
     --fundo: #1a1b1e;
     --superficie: #232428;
-    --lateral: rgb(32 34 40 / 0.45);
+    --lateral: rgb(40 43 50 / 0.72);
     --veu: rgb(0 0 0 / 0.35);
     --toast: #f1f2f4;
     --sobre-toast: #1a1b1e;
@@ -94,6 +98,17 @@
     --sombra-p: 0 1px 2px rgb(0 0 0 / 0.3);
     --sombra-m: 0 4px 12px rgb(0 0 0 / 0.35), 0 1px 3px rgb(0 0 0 / 0.3);
     --sombra-g: 0 24px 60px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.4);
+    --sombra-folha: -20px 0 60px rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Sem material Mica (Windows 10, browser): barra lateral sólida. */
+:root[data-sem-mica] {
+  --lateral: #eceff4;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-sem-mica] {
+    --lateral: #202228;
   }
 }
 
@@ -110,10 +125,9 @@
   }
 }
 
-/* Mais contraste: bordas definidas. */
+/* Mais contraste: só as bordas ficam definidas; os preenchimentos mantêm-se legíveis. */
 @media (prefers-contrast: more) {
   :root {
-    --linha: var(--texto-2);
-    --borda: 1px solid var(--texto-2);
+    --cor-borda: var(--texto-2);
   }
 }

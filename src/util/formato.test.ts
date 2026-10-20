@@ -20,6 +20,9 @@ test('parseEuros — casos extra', () => {
   expect(parseEuros('1.234.567')).toBe(123456700)
   expect(parseEuros('1.234.567,8')).toBe(123456780)
   expect(parseEuros('45.50')).toBe(4550)
+  expect(parseEuros('90071992547409,91')).toBe(Number.MAX_SAFE_INTEGER)
+  expect(parseEuros('90071992547409,92')).toBeNull() // fora dos inteiros seguros
+  expect(parseEuros('9'.repeat(30))).toBeNull()
   for (const s of [
     '   ',
     '€',

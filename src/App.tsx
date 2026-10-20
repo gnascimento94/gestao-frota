@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Aviso, useEstadoArmazenamento } from './ui/Aviso'
+import { Aviso } from './ui/Aviso'
 import { Barra } from './ui/Barra'
 import { Cartao } from './ui/Cartao'
 import { Desfazer, DesfazerProvider } from './ui/Desfazer'
 import { CabecalhoFolha, Folha } from './ui/Folha'
+import { useEstadoArmazenamento } from './ui/useEstadoArmazenamento'
 
 export type Ecra =
   | { nome: 'inicio' }

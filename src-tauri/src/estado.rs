@@ -515,6 +515,10 @@ impl Estado {
         }
         drop(gl);
         *gc = None;
+        match &primeiro {
+            None => log::info!("fechar: gravado, cópia diária, lock libertado"),
+            Some(e) => log::warn!("fechar: concluído com erro: {}", e.mensagem),
+        }
         primeiro.map_or(Ok(()), Err)
     }
 

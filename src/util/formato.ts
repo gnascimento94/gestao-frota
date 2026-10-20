@@ -10,8 +10,9 @@ function agrupar(inteiro: number): string {
   return String(inteiro).replace(/\B(?=(\d{3})+(?!\d))/g, ESPACO_FINO)
 }
 
-function centimos(euros: string, decimais: string | undefined): number {
-  return Number(euros) * 100 + (decimais ? Number(decimais.padEnd(2, '0')) : 0)
+function centimos(euros: string, decimais: string | undefined): number | null {
+  const c = Number(euros) * 100 + (decimais ? Number(decimais.padEnd(2, '0')) : 0)
+  return Number.isSafeInteger(c) ? c : null
 }
 
 /**

@@ -1,52 +1,7 @@
-// Estado da gravação: consulta `estadoArmazenamento()` a cada 5 s e mostra um aviso
-// quando a gravação falhou ou o programa está aberto só para consulta.
+// Banner sobre a gravação: erro ao guardar ou programa aberto só para consulta.
+// O estado vem de useEstadoArmazenamento (./useEstadoArmazenamento), que consulta a cada 5 s.
 
-import { useEffect, useRef, useState } from 'react'
-import { estadoArmazenamento } from '../api/comandos'
-import type { EstadoArmazenamento } from '../api/tipos'
-
-export interface EstadoGravacao {
-  /** Último estado conhecido (`null` até à primeira resposta). */
-  estado: EstadoArmazenamento | null
-  /** A última consulta falhou (o estado mostrado pode estar desatualizado). */
-  falhou: boolean
-}
-
-export function useEstadoArmazenamento(
-  intervaloMs = 5000,
-  consultar: () => Promise<EstadoArmazenamento> = estadoArmazenamento,
-): EstadoGravacao {
-  const [valor, setValor] = useState<EstadoGravacao>({ estado: null, falhou: false })
-  const consultarRef = useRef(consultar)
-  useEffect(() => {
-    consultarRef.current = consultar
-  })
-
-  useEffect(() => {
-    let ativo = true
-    let emCurso = false
-    const atualizar = async () => {
-      if (emCurso) return
-      emCurso = true
-      try {
-        const estado = await consultarRef.current()
-        if (ativo) setValor({ estado, falhou: false })
-      } catch {
-        if (ativo) setValor((v) => ({ estado: v.estado, falhou: true }))
-      } finally {
-        emCurso = false
-      }
-    }
-    void atualizar()
-    const t = setInterval(() => void atualizar(), intervaloMs)
-    return () => {
-      ativo = false
-      clearInterval(t)
-    }
-  }, [intervaloMs])
-
-  return valor
-}
+import type { EstadoGravacao } from './useEstadoArmazenamento'
 
 /** Banner de aviso sobre a gravação. Não mostra nada quando está tudo bem. */
 export function Aviso({ estado, falhou }: EstadoGravacao) {

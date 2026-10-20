@@ -3,7 +3,7 @@
 import type { Ref } from 'react'
 import type { Ecra } from '../App'
 import { formatarHora } from '../util/formato'
-import type { EstadoGravacao } from './Aviso'
+import type { EstadoGravacao } from './useEstadoArmazenamento'
 import { Botao } from './Botao'
 
 type NomeNav = Exclude<Ecra['nome'], 'carro'>

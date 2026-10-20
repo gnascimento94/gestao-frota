@@ -46,7 +46,7 @@ textarea {
 
 kbd {
   font: 500 0.6875rem/1.4 var(--fonte-texto);
-  border: 1px solid var(--linha);
+  border: var(--borda);
   border-radius: 4px;
   padding: 0 4px;
 }
@@ -440,12 +440,12 @@ time {
 }
 
 .botao-secundario {
-  background: var(--linha);
+  background: var(--preenchimento);
   color: var(--texto);
 }
 
 .botao-secundario:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--linha), var(--texto) 6%);
+  background: color-mix(in srgb, var(--preenchimento), var(--texto) 6%);
 }
 
 .botao-simples {
@@ -470,8 +470,12 @@ time {
 
 @media (prefers-contrast: more) {
   .botao-secundario,
-  .botao-simples {
+  .botao-simples,
+  :root .folha-fechar {
     border: var(--borda);
+  }
+  :root .folha-fechar {
+    color: var(--texto);
   }
 }
 
@@ -719,7 +723,7 @@ time {
   z-index: 21;
   width: min(440px, 100%);
   background: var(--superficie);
-  box-shadow: var(--sombra-g);
+  box-shadow: var(--sombra-folha);
   display: flex;
   flex-direction: column;
   outline: none;
@@ -748,7 +752,7 @@ time {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--linha);
+  background: var(--preenchimento);
   color: var(--texto-2);
   cursor: pointer;
 }
