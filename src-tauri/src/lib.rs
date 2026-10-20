@@ -1,4 +1,4 @@
-﻿#[allow(dead_code)]
+#[allow(dead_code)]
 mod armazenamento;
 #[allow(dead_code)]
 mod erro;
