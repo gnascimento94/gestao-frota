@@ -138,7 +138,7 @@ pub fn alertas_manutencao(
 
             let vencido = falta_km.is_some_and(|k| k <= 0) || falta_dias.is_some_and(|d| d <= 0);
             let proximo =
-                falta_km.is_some_and(|k| k <= lim.km) || falta_dias.is_some_and(|d| d <= lim.dias);
+                falta_km.is_some_and(|k| k < lim.km) || falta_dias.is_some_and(|d| d < lim.dias);
             let nivel = if vencido {
                 Nivel::Vencido
             } else if proximo {
@@ -661,8 +661,58 @@ mod testes {
         let r = alertas_multas(&[m], d(2026, 10, 26));
         assert_eq!(r[0].nivel, Nivel::Vencido);
         assert_eq!(r[0].falta_dias, Some(-3));
-        // longe: 10 dias úteis restantes
-        assert!(alertas_multas(&[m], d(2026, 10, 8)).is_empty());
+        // fronteira: 5 dias úteis restantes -> Proximo; 6 -> nada
+        assert_eq!(
+            alertas_multas(&[m], d(2026, 10, 16))[0].nivel,
+            Nivel::Proximo
+        );
+        assert!(alertas_multas(&[m], d(2026, 10, 15)).is_empty());
+    }
+
+    #[test]
+    fn limiares_de_manutencao_sao_estritos() {
+        let km = |atual| {
+            alertas_manutencao(
+                &[carro(atual)],
+                &[plano(Some(15_000), None)],
+                &[],
+                &lim(),
+                hoje(),
+            )
+        };
+        assert!(km(64_000).is_empty()); // falta 1000
+        assert_eq!(km(64_001)[0].nivel, Nivel::Proximo); // falta 999
+        assert_eq!(km(65_000)[0].nivel, Nivel::Vencido); // falta 0
+        let dias = |base: NaiveDate| {
+            let mut c = carro(50_000);
+            c.base_data = base;
+            alertas_manutencao(&[c], &[plano(None, Some(1))], &[], &lim(), hoje())
+        };
+        assert!(dias(d(2026, 10, 19)).is_empty()); // falta 30
+        assert_eq!(dias(d(2026, 10, 18))[0].nivel, Nivel::Proximo); // falta 29
+        assert_eq!(dias(d(2026, 9, 20))[0].nivel, Nivel::Vencido); // falta 0
+    }
+
+    #[test]
+    fn varias_ultimas_do_mesmo_tipo_usa_a_mais_recente() {
+        let u = |data, km| UltimaManutencao {
+            carro_id: 1,
+            tipo_id: 4,
+            data,
+            km,
+        };
+        let antiga = u(d(2026, 1, 1), 50_000);
+        let recente = u(d(2026, 9, 1), 64_000);
+        for ultimas in [[antiga, recente], [recente, antiga]] {
+            let r = alertas_manutencao(
+                &[carro(64_500)],
+                &[plano(Some(15_000), None)],
+                &ultimas,
+                &lim(),
+                hoje(),
+            );
+            assert!(r.is_empty());
+        }
     }
 
     #[test]

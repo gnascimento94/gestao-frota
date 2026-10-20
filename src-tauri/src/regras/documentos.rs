@@ -26,9 +26,11 @@ pub fn proximo_anual(
         tipo: tipo.to_string(),
         descricao: descricao.to_string(),
         valor,
+        // +12 meses só falha se ultrapassar o intervalo de NaiveDate (ano ~262000),
+        // o que não acontece com datas de vencimento reais.
         vencimento: vencimento
             .checked_add_months(Months::new(12))
-            .unwrap_or(vencimento),
+            .expect("vencimento + 12 meses dentro do intervalo de datas"),
         anual: true,
         gerado_de_id: id,
     }
