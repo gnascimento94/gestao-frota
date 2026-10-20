@@ -98,9 +98,11 @@ pub fn run() {
                 }
             }
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                handle.state::<Estado>().tick(Local::now().naive_local());
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    handle.state::<Estado>().tick(Local::now().naive_local());
+                }
             });
             Ok(())
         })

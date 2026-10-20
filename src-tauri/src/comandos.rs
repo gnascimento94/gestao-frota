@@ -11,10 +11,10 @@ use crate::regras::alertas::Limiares;
 use crate::repositorio::carros::{self, Carro, CarroInput};
 use crate::repositorio::consultas::{self, FiltroRelatorio, Painel, Relatorio};
 use crate::repositorio::historico::{self, HistoricoItem};
-use crate::repositorio::lancamentos::{
-    self, DocumentoInput, KmInput, ManutencaoInput, PneuInput,
+use crate::repositorio::lancamentos::{self, DocumentoInput, KmInput, ManutencaoInput, PneuInput};
+use crate::repositorio::motoristas::{
+    self, Atribuicao, FiltroAtribuicoes, Motorista, MotoristaInput,
 };
-use crate::repositorio::motoristas::{self, Atribuicao, FiltroAtribuicoes, Motorista, MotoristaInput};
 use crate::repositorio::multas::{self, MultaInput, ResumoMultasMotorista};
 use crate::repositorio::planos::{self, Plano, PlanoInput, TipoManutencao};
 use crate::repositorio::{config, data as ler_data};
@@ -89,7 +89,10 @@ pub fn verificar_atualizacao(e: E<'_>) -> Option<NovaVersao> {
     }
     let l = atualizacao::verificar(env!("CARGO_PKG_VERSION"))?;
     log::info!("atualização disponível: {}", l.versao);
-    Some(NovaVersao { versao: l.versao, notas: l.notas })
+    Some(NovaVersao {
+        versao: l.versao,
+        notas: l.notas,
+    })
 }
 
 /// Descarrega e valida `Frota.new.exe`, grava os dados, faz a cópia
@@ -115,9 +118,9 @@ pub fn aplicar_atualizacao(app: tauri::AppHandle, e: E<'_>) -> Res<()> {
     let (l, novo) = atualizacao::preparar(&exe, env!("CARGO_PKG_VERSION"))?;
     // Grava, faz a cópia antes da versão e troca os executáveis; em falha apaga
     // `Frota.new.exe` (salvo troca a meio, em que a mensagem diz onde estão).
-    if let Err(err) =
-        atualizacao::instalar(&exe, &novo, || e.gravar_antes_de_atualizar(&l.versao, agora()))
-    {
+    if let Err(err) = atualizacao::instalar(&exe, &novo, || {
+        e.gravar_antes_de_atualizar(&l.versao, agora())
+    }) {
         log::warn!("atualização abortada: {}", err.mensagem);
         return Err(err);
     }
@@ -169,7 +172,9 @@ pub fn motorista_apagar(e: E<'_>, id: i64) -> Res<()> {
 #[tauri::command(async)]
 pub fn atribuir(e: E<'_>, carro_id: i64, motorista_id: Option<i64>, data: String) -> Res<()> {
     let dia = ler_data(&data)?;
-    e.mutar(agora(), |c| motoristas::atribuir(c, carro_id, motorista_id, dia))
+    e.mutar(agora(), |c| {
+        motoristas::atribuir(c, carro_id, motorista_id, dia)
+    })
 }
 
 /// Atribuições (mais recentes primeiro), filtradas por carro e/ou motorista.
@@ -179,7 +184,10 @@ pub fn atribuicoes_listar(
     carro_id: Option<i64>,
     motorista_id: Option<i64>,
 ) -> Res<Vec<Atribuicao>> {
-    let f = FiltroAtribuicoes { carro_id, motorista_id };
+    let f = FiltroAtribuicoes {
+        carro_id,
+        motorista_id,
+    };
     e.ler(|c| motoristas::atribuicoes_de(c, &f))
 }
 
@@ -218,7 +226,9 @@ pub fn atualizar_km(e: E<'_>, input: KmInput) -> Res<i64> {
 #[tauri::command(async)]
 pub fn pagar_documento(e: E<'_>, id: i64, pago_em: String) -> Res<Option<i64>> {
     let h = hoje();
-    e.mutar(agora(), |c| lancamentos::pagar_documento(c, id, &pago_em, h))
+    e.mutar(agora(), |c| {
+        lancamentos::pagar_documento(c, id, &pago_em, h)
+    })
 }
 
 /// `tipo`: manutencao | pneu | documento | multa | km.
@@ -252,7 +262,9 @@ pub fn marcar_reembolsado(e: E<'_>, id: i64, data: String) -> Res<()> {
 pub fn identificar_condutor(e: E<'_>, id: i64, motorista_id: i64, data: String) -> Res<()> {
     let dia = ler_data(&data)?;
     let h = hoje();
-    e.mutar(agora(), |c| multas::identificar_condutor(c, id, motorista_id, dia, h))
+    e.mutar(agora(), |c| {
+        multas::identificar_condutor(c, id, motorista_id, dia, h)
+    })
 }
 
 #[tauri::command(async)]

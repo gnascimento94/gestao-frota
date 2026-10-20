@@ -76,7 +76,9 @@ pub fn listar_motoristas(
                 carta_validade: r.get(4)?,
                 ativo,
                 notas: r.get(6)?,
-                alerta_carta: validade.filter(|_| ativo).and_then(|v| nivel_carta(v, hoje)),
+                alerta_carta: validade
+                    .filter(|_| ativo)
+                    .and_then(|v| nivel_carta(v, hoje)),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

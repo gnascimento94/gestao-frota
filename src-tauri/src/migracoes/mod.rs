@@ -47,11 +47,19 @@ mod testes {
         assert_eq!(versao_esquema(&c).unwrap(), MIGRACOES.len() as i64);
         assert_eq!(contar(&c, "SELECT COUNT(*) FROM tipos_manutencao"), 11);
         let v: String = c
-            .query_row("SELECT valor FROM config WHERE chave='limiar_km'", [], |r| r.get(0))
+            .query_row(
+                "SELECT valor FROM config WHERE chave='limiar_km'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(v, "1000");
         let d: String = c
-            .query_row("SELECT valor FROM config WHERE chave='limiar_dias'", [], |r| r.get(0))
+            .query_row(
+                "SELECT valor FROM config WHERE chave='limiar_dias'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(d, "30");
     }
@@ -90,11 +98,19 @@ mod testes {
         let mut c = mem();
         migrar(&mut c).unwrap();
         c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-        c.execute("INSERT INTO carros(matricula) VALUES ('AA-00-AA')", []).unwrap();
-        assert!(c.execute("INSERT INTO carros(matricula) VALUES ('AA-00-AA')", []).is_err());
-        assert!(c
-            .execute("INSERT INTO carros(matricula, estado) VALUES ('BB-00-BB','x')", [])
-            .is_err());
+        c.execute("INSERT INTO carros(matricula) VALUES ('AA-00-AA')", [])
+            .unwrap();
+        assert!(
+            c.execute("INSERT INTO carros(matricula) VALUES ('AA-00-AA')", [])
+                .is_err()
+        );
+        assert!(
+            c.execute(
+                "INSERT INTO carros(matricula, estado) VALUES ('BB-00-BB','x')",
+                []
+            )
+            .is_err()
+        );
         // oficina obrigatória
         assert!(c
             .execute(
@@ -119,10 +135,18 @@ mod testes {
             .execute("INSERT INTO documentos(carro_id,tipo,valor,vencimento) VALUES (1,'multa',1,'2026-01-01')", [])
             .is_err());
         // plano sem km nem meses
-        assert!(c.execute("INSERT INTO planos(tipo_id) VALUES (1)", []).is_err());
+        assert!(
+            c.execute("INSERT INTO planos(tipo_id) VALUES (1)", [])
+                .is_err()
+        );
         // RESTRICT
         assert!(c.execute("DELETE FROM carros WHERE id=1", []).is_err());
-        assert_eq!(contar(&c, "SELECT COUNT(*) FROM sqlite_master WHERE name='abastecimentos'"), 0);
+        assert_eq!(
+            contar(
+                &c,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='abastecimentos'"
+            ),
+            0
+        );
     }
 }
-

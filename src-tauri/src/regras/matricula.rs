@@ -1,7 +1,8 @@
 use crate::erro::{Erro, Res};
 
 fn invalida() -> Erro {
-    Erro { campo: None,
+    Erro {
+        campo: None,
         codigo: "matricula_invalida".into(),
         mensagem: "Matrícula inválida. Exemplo: AA-12-BB".into(),
     }
@@ -56,7 +57,15 @@ mod testes {
 
     #[test]
     fn matricula_invalida() {
-        for s in ["", "ABC", "AB-12-B", "AB-CD-EF", "12-34-56", "AÁ-12-BB", "AA/12/BB"] {
+        for s in [
+            "",
+            "ABC",
+            "AB-12-B",
+            "AB-CD-EF",
+            "12-34-56",
+            "AÁ-12-BB",
+            "AA/12/BB",
+        ] {
             let e = normalizar_matricula(s).unwrap_err();
             assert_eq!(e.codigo, "matricula_invalida");
             assert_eq!(e.mensagem, "Matrícula inválida. Exemplo: AA-12-BB");

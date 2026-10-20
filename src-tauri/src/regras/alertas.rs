@@ -704,13 +704,25 @@ mod testes {
     #[test]
     fn manutencao_mostra_a_dimensao_que_decide() {
         // km perto (falta 500) e data longe: decide o km
-        let r = alertas_manutencao(&[carro(64_500)], &[plano(Some(15_000), Some(12))], &[], &lim(), hoje());
-        assert_eq!((r[0].motivo, r[0].falta_km, r[0].falta_dias), (Some(Motivo::Km), Some(500), None));
+        let r = alertas_manutencao(
+            &[carro(64_500)],
+            &[plano(Some(15_000), Some(12))],
+            &[],
+            &lim(),
+            hoje(),
+        );
+        assert_eq!(
+            (r[0].motivo, r[0].falta_km, r[0].falta_dias),
+            (Some(Motivo::Km), Some(500), None)
+        );
         // km longe e data perto (falta 10 dias): decide a data
         let mut c = carro(51_000);
         c.base_data = d(2025, 10, 30);
         let r = alertas_manutencao(&[c], &[plano(Some(15_000), Some(12))], &[], &lim(), hoje());
-        assert_eq!((r[0].motivo, r[0].falta_km, r[0].falta_dias), (Some(Motivo::Dias), None, Some(10)));
+        assert_eq!(
+            (r[0].motivo, r[0].falta_km, r[0].falta_dias),
+            (Some(Motivo::Dias), None, Some(10))
+        );
         assert_eq!(r[0].data, Some(d(2026, 10, 30)));
         // serializa em camelCase e a data como "AAAA-MM-DD"
         let j = serde_json::to_value(&r[0]).unwrap();

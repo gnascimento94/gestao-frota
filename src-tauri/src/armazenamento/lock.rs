@@ -30,7 +30,9 @@ fn ler(caminho: &Path) -> Estado {
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData => return Estado::Lixo,
         Err(_) => return Estado::Desconhecido,
     };
-    let Some((pc, hora)) = texto.split_once('\n') else { return Estado::Lixo };
+    let Some((pc, hora)) = texto.split_once('\n') else {
+        return Estado::Lixo;
+    };
     match DateTime::parse_from_rfc3339(hora.trim()) {
         Ok(h) => Estado::Valido(pc.to_string(), h.with_timezone(&Utc)),
         Err(_) => Estado::Lixo,
@@ -45,7 +47,11 @@ fn fresco(agora: DateTime<Utc>, hora: DateTime<Utc>) -> bool {
 }
 
 fn bloqueado(pc: impl Into<String>) -> Erro {
-    Erro { campo: None, codigo: "bloqueado".into(), mensagem: pc.into() }
+    Erro {
+        campo: None,
+        codigo: "bloqueado".into(),
+        mensagem: pc.into(),
+    }
 }
 
 /// Lock ilegível (lixo ou erro de leitura): aplica a regra dos 120 s à data de
@@ -89,7 +95,10 @@ fn escrever(caminho: &Path, pc: &str, agora: DateTime<Utc>) -> Res<()> {
 pub fn adquirir(caminho: &Path, pc: &str, agora: DateTime<Utc>) -> Result<Lock, Erro> {
     verificar(caminho, pc, agora)?;
     escrever(caminho, pc, agora)?;
-    Ok(Lock { caminho: caminho.to_path_buf(), pc: pc.to_string() })
+    Ok(Lock {
+        caminho: caminho.to_path_buf(),
+        pc: pc.to_string(),
+    })
 }
 
 impl Lock {
@@ -184,7 +193,10 @@ mod testes {
         std::fs::write(&p, b"lixo sem formato").unwrap();
         mudar_mtime(&p, agora() - Duration::seconds(10));
         let e = adquirir(&p, "PC-Y", agora()).err().unwrap();
-        assert_eq!((e.codigo.as_str(), e.mensagem.as_str()), ("bloqueado", "desconhecido"));
+        assert_eq!(
+            (e.codigo.as_str(), e.mensagem.as_str()),
+            ("bloqueado", "desconhecido")
+        );
         assert_eq!(std::fs::read(&p).unwrap(), b"lixo sem formato");
     }
 

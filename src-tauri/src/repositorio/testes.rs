@@ -405,8 +405,14 @@ fn estado_da_multa_nos_quatro_casos() {
     let lista = multas_listar(&c, Some(a), None).unwrap();
     let hist = historico(&c, Some(a), 50).unwrap();
     for (id, estado) in esperado {
-        assert_eq!(lista.iter().find(|x| x.id == id).unwrap().estado_multa, estado);
-        let h = hist.iter().find(|x| x.tipo == "multa" && x.id == id).unwrap();
+        assert_eq!(
+            lista.iter().find(|x| x.id == id).unwrap().estado_multa,
+            estado
+        );
+        let h = hist
+            .iter()
+            .find(|x| x.tipo == "multa" && x.id == id)
+            .unwrap();
         assert_eq!(h.estado_multa, Some(estado));
     }
     // o filtro por motorista só traz as multas dele; a por identificar não aparece
@@ -418,7 +424,10 @@ fn estado_da_multa_nos_quatro_casos() {
         .filter(|x| x.estado_multa == EstadoMulta::PorReembolsar)
         .map(|x| x.valor_colaborador)
         .sum();
-    assert_eq!(multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar, somatorio);
+    assert_eq!(
+        multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar,
+        somatorio
+    );
     assert_eq!(somatorio, 6_000);
 }
 
@@ -766,7 +775,10 @@ fn referencias_inexistentes_e_data_de_saida() {
     let mut i = carro_input("CC-34-DD");
     i.data_aquisicao = Some("2026-03-01".into());
     i.data_saida = Some("2026-02-28".into());
-    assert_eq!(guardar_carro(&c, &i).unwrap_err().codigo, "data_saida_invalida");
+    assert_eq!(
+        guardar_carro(&c, &i).unwrap_err().codigo,
+        "data_saida_invalida"
+    );
     i.data_saida = Some("2026-03-01".into());
     guardar_carro(&c, &i).unwrap();
 }
@@ -1137,7 +1149,6 @@ fn historico_ordenado_por_data() {
     assert!(json.contains("\"carroId\""));
 }
 
-
 #[test]
 fn erros_de_data_indicam_o_campo() {
     let mut c = bd();
@@ -1161,7 +1172,10 @@ fn erros_de_data_indicam_o_campo() {
     type Campo = fn(&mut MultaInput) -> &mut Option<String>;
     let campos: [(Campo, &str); 4] = [
         (|m| &mut m.data_notificacao, "dataNotificacao"),
-        (|m| &mut m.condutor_identificado_em, "condutorIdentificadoEm"),
+        (
+            |m| &mut m.condutor_identificado_em,
+            "condutorIdentificadoEm",
+        ),
         (|m| &mut m.reembolsado_em, "reembolsadoEm"),
         (|m| &mut m.vencimento, "vencimento"),
     ];
@@ -1175,20 +1189,33 @@ fn erros_de_data_indicam_o_campo() {
     let mut m = base.clone();
     m.data_infracao = "2026-10-21".into();
     let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
-    assert_eq!((e.codigo.as_str(), e.campo.as_deref()), ("data_futura", Some("dataInfracao")));
+    assert_eq!(
+        (e.codigo.as_str(), e.campo.as_deref()),
+        ("data_futura", Some("dataInfracao"))
+    );
 
     // documento: vencimento e pago_em
     let e = lancar_documento(&mut c, &doc(a, "IUC", 100, "2026-13-01", None), hoje()).unwrap_err();
     assert_eq!(e.campo.as_deref(), Some("vencimento"));
-    let e = lancar_documento(&mut c, &doc(a, "IUC", 100, "2027-01-01", Some("2026-10-21")), hoje())
-        .unwrap_err();
-    assert_eq!((e.codigo.as_str(), e.campo.as_deref()), ("data_futura", Some("pagoEm")));
+    let e = lancar_documento(
+        &mut c,
+        &doc(a, "IUC", 100, "2027-01-01", Some("2026-10-21")),
+        hoje(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        (e.codigo.as_str(), e.campo.as_deref()),
+        ("data_futura", Some("pagoEm"))
+    );
 
     // manutenção: qual dos valores; referência inválida não ganha campo
     let mut mt = manut(a, "2026-10-01", None);
     mt.valor_pecas = Some(-1);
     let e = lancar_manutencao(&mut c, &mt, hoje()).unwrap_err();
-    assert_eq!((e.codigo.as_str(), e.campo.as_deref()), ("valor_invalido", Some("valorPecas")));
+    assert_eq!(
+        (e.codigo.as_str(), e.campo.as_deref()),
+        ("valor_invalido", Some("valorPecas"))
+    );
     let mut m = base.clone();
     m.carro_id = 999;
     let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
@@ -1198,9 +1225,16 @@ fn erros_de_data_indicam_o_campo() {
 #[test]
 fn erro_sem_campo_nao_serializa_campo() {
     let e = crate::repositorio::erro("so_consulta", "Só consulta.");
-    assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"codigo":"so_consulta","mensagem":"Só consulta."}"#);
+    assert_eq!(
+        serde_json::to_string(&e).unwrap(),
+        r#"{"codigo":"so_consulta","mensagem":"Só consulta."}"#
+    );
     let e = e.com_campo("pagoEm");
-    assert!(serde_json::to_string(&e).unwrap().contains(r#""campo":"pagoEm""#));
+    assert!(
+        serde_json::to_string(&e)
+            .unwrap()
+            .contains(r#""campo":"pagoEm""#)
+    );
 }
 
 #[test]
@@ -1287,10 +1321,19 @@ fn relatorio_por_reembolsar_usa_a_mesma_regra_da_ficha() {
     };
     let ficha = multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar;
     assert_eq!(ficha, 8_000);
-    assert_eq!(relatorio(&c, &filtro(Some(ana))).unwrap().multas.por_reembolsar, ficha);
+    assert_eq!(
+        relatorio(&c, &filtro(Some(ana)))
+            .unwrap()
+            .multas
+            .por_reembolsar,
+        ficha
+    );
     assert_eq!(soma(multas_listar(&c, None, Some(ana)).unwrap()), ficha);
     let todas = soma(multas_listar(&c, None, None).unwrap());
-    assert_eq!(relatorio(&c, &filtro(None)).unwrap().multas.por_reembolsar, todas);
+    assert_eq!(
+        relatorio(&c, &filtro(None)).unwrap().multas.por_reembolsar,
+        todas
+    );
     assert_eq!(todas, 8_000);
 }
 #[test]
@@ -1298,10 +1341,21 @@ fn tipo_de_manutencao_desativa_e_reativa() {
     let c = bd();
     let id = guardar_tipo(&c, None, "Correia").unwrap();
     definir_tipo_ativo(&c, id, false).unwrap();
-    let t = listar_tipos(&c).unwrap().into_iter().find(|t| t.id == id).unwrap();
+    let t = listar_tipos(&c)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == id)
+        .unwrap();
     assert!(!t.ativo);
     definir_tipo_ativo(&c, id, true).unwrap();
-    let t = listar_tipos(&c).unwrap().into_iter().find(|t| t.id == id).unwrap();
+    let t = listar_tipos(&c)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == id)
+        .unwrap();
     assert!(t.ativo);
-    assert_eq!(definir_tipo_ativo(&c, 9999, false).unwrap_err().codigo, "nao_encontrado");
+    assert_eq!(
+        definir_tipo_ativo(&c, 9999, false).unwrap_err().codigo,
+        "nao_encontrado"
+    );
 }

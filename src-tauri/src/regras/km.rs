@@ -12,7 +12,11 @@ pub fn km_atual(km_inicial: i64, leituras: &[Leitura]) -> i64 {
 
 /// Se `km` é inferior à maior leitura com data <= `data`, devolve essa leitura.
 pub fn km_abaixo_do_anterior(leituras: &[Leitura], data: NaiveDate, km: i64) -> Option<i64> {
-    let max = leituras.iter().filter(|l| l.data <= data).map(|l| l.km).max()?;
+    let max = leituras
+        .iter()
+        .filter(|l| l.data <= data)
+        .map(|l| l.km)
+        .max()?;
     (km < max).then_some(max)
 }
 
@@ -24,7 +28,10 @@ mod testes {
         NaiveDate::from_ymd_opt(2026, m, dia).unwrap()
     }
     fn l(m: u32, dia: u32, km: i64) -> Leitura {
-        Leitura { data: d(m, dia), km }
+        Leitura {
+            data: d(m, dia),
+            km,
+        }
     }
 
     #[test]

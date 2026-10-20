@@ -88,11 +88,18 @@ fn trava<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn erro(codigo: &str, mensagem: impl Into<String>) -> Erro {
-    Erro { campo: None, codigo: codigo.into(), mensagem: mensagem.into() }
+    Erro {
+        campo: None,
+        codigo: codigo.into(),
+        mensagem: mensagem.into(),
+    }
 }
 
 fn erro_so_consulta() -> Erro {
-    erro("so_consulta", "Aberto só para consulta — não é possível alterar dados.")
+    erro(
+        "so_consulta",
+        "Aberto só para consulta — não é possível alterar dados.",
+    )
 }
 
 fn sem_dados() -> Erro {
@@ -125,16 +132,26 @@ pub(crate) fn para_utc(agora: NaiveDateTime) -> DateTime<Utc> {
 /// A pasta parece estar dentro do Google Drive para computador?
 pub fn no_google_drive(pasta: &Path) -> bool {
     let s = format!("{}\\", pasta.to_string_lossy().replace('/', "\\")).to_lowercase();
-    [r"\meu disco\", r"\o meu disco\", r"\my drive\", r"\google drive\"]
-        .iter()
-        .any(|p| s.contains(p))
+    [
+        r"\meu disco\",
+        r"\o meu disco\",
+        r"\my drive\",
+        r"\google drive\",
+    ]
+    .iter()
+    .any(|p| s.contains(p))
 }
 
 /// Tamanho, data de modificação (ns) e primeiros 100 bytes (hex) do ficheiro;
 /// `None` se não existir ou não se conseguir ler.
 fn assinatura_de(p: &Path) -> Option<String> {
     let m = std::fs::metadata(p).ok()?;
-    let mtime = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos();
+    let mtime = m
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
     let mut cab = Vec::with_capacity(100);
     std::fs::File::open(p)
         .ok()?
@@ -168,7 +185,12 @@ impl Estado {
     }
 
     /// Cria as pastas, adquire o lock e prepara a cópia de trabalho.
-    pub fn arrancar(raiz: &Path, local: &Path, pc: &str, agora: NaiveDateTime) -> (Estado, Arranque) {
+    pub fn arrancar(
+        raiz: &Path,
+        local: &Path,
+        pc: &str,
+        agora: NaiveDateTime,
+    ) -> (Estado, Arranque) {
         let e = Estado::novo(raiz, local, pc);
         let a = e.iniciar(&mut trava(&e.conn), agora);
         *trava(&e.arranque) = a.clone();
@@ -233,7 +255,11 @@ impl Estado {
         let l = match lock::adquirir(&self.caminho_lock(), &self.pc, para_utc(agora)) {
             Ok(l) => l,
             Err(e) if e.codigo == "bloqueado" => return Arranque::Bloqueado { pc: e.mensagem },
-            Err(e) => return Arranque::SemPasta { mensagem: e.mensagem },
+            Err(e) => {
+                return Arranque::SemPasta {
+                    mensagem: e.mensagem,
+                };
+            }
         };
         // Alterações pendentes feitas sobre um banco que entretanto outro PC
         // gravou: guardam-se como versão e segue-se a partir do banco.
@@ -243,7 +269,9 @@ impl Estado {
                 Ok(()) => aviso = Some(msg_conflito(agora)),
                 Err(e) => {
                     let _ = l.libertar();
-                    return Arranque::SemPasta { mensagem: msg_conflito_sem_copia(&e) };
+                    return Arranque::SemPasta {
+                        mensagem: msg_conflito_sem_copia(&e),
+                    };
                 }
             }
         }
@@ -263,7 +291,9 @@ impl Estado {
                 match e.codigo.as_str() {
                     "corrompido" => Arranque::Corrompido,
                     "versao_mais_recente" => Arranque::VersaoMaisRecente,
-                    _ => Arranque::SemPasta { mensagem: e.mensagem },
+                    _ => Arranque::SemPasta {
+                        mensagem: e.mensagem,
+                    },
                 }
             }
         }
@@ -279,7 +309,13 @@ impl Estado {
     }
 
     /// Passa a trabalhar sobre `conn` com o lock `l` (modo normal).
-    fn instalar(&self, slot: &mut Option<Connection>, conn: Connection, l: Lock, agora: NaiveDateTime) {
+    fn instalar(
+        &self,
+        slot: &mut Option<Connection>,
+        conn: Connection,
+        l: Lock,
+        agora: NaiveDateTime,
+    ) {
         *slot = Some(conn);
         *trava(&self.lock) = Some(l);
         *trava(&self.ultima_renovacao) = Some(agora);
@@ -307,7 +343,10 @@ impl Estado {
         let atual = self.arranque();
         let repetir = g.is_none()
             && !self.fechado.load(Ordering::SeqCst)
-            && matches!(atual, Arranque::Bloqueado { .. } | Arranque::SemPasta { .. });
+            && matches!(
+                atual,
+                Arranque::Bloqueado { .. } | Arranque::SemPasta { .. }
+            );
         if !repetir {
             return atual;
         }
@@ -379,7 +418,11 @@ impl Estado {
 
     /// Escrita: recusada em modo consulta; o marcador `pendente` é criado antes
     /// de `f` e, se `f` correr bem, `alterado` regista a alteração para gravar.
-    pub fn mutar<T>(&self, agora: NaiveDateTime, f: impl FnOnce(&mut Connection) -> Res<T>) -> Res<T> {
+    pub fn mutar<T>(
+        &self,
+        agora: NaiveDateTime,
+        f: impl FnOnce(&mut Connection) -> Res<T>,
+    ) -> Res<T> {
         if self.so_consulta.load(Ordering::SeqCst) {
             return Err(erro_so_consulta());
         }
@@ -649,7 +692,10 @@ impl Estado {
             Err(e) if e.codigo == "bloqueado" => {
                 return Err(erro(
                     "bloqueado",
-                    format!("O sistema está aberto no PC «{}». Feche-o lá primeiro.", e.mensagem),
+                    format!(
+                        "O sistema está aberto no PC «{}». Feche-o lá primeiro.",
+                        e.mensagem
+                    ),
                 ));
             }
             Err(e) => return Err(e),
@@ -713,7 +759,8 @@ mod testes {
 
     fn carros_no_banco(p: &Path) -> i64 {
         let c = Connection::open_with_flags(p, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        c.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap()
+        c.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap()
     }
 
     #[test]
@@ -740,10 +787,15 @@ mod testes {
         let (e, a) = Estado::arrancar(&raiz, &local, "PC-Y", t0());
         assert_eq!(a, Arranque::Bloqueado { pc: "PC-X".into() });
         // não ficou com dados abertos nem tocou no lock do outro PC
-        assert_eq!(inserir(&e, t0(), "AA-00-AA").unwrap_err().codigo, "sem_dados");
-        assert!(std::fs::read_to_string(dados.join("frota.lock"))
-            .unwrap()
-            .starts_with("PC-X\n"));
+        assert_eq!(
+            inserir(&e, t0(), "AA-00-AA").unwrap_err().codigo,
+            "sem_dados"
+        );
+        assert!(
+            std::fs::read_to_string(dados.join("frota.lock"))
+                .unwrap()
+                .starts_with("PC-X\n")
+        );
     }
 
     #[test]
@@ -846,18 +898,30 @@ mod testes {
         assert!(est.so_consulta);
         assert_eq!(
             est.erro.as_deref(),
-            Some("O sistema foi aberto noutro PC (PC-X). As alterações feitas neste PC foram guardadas em Backup (cópia de 20/10 12:00). Feche e volte a abrir o sistema.")
+            Some(
+                "O sistema foi aberto noutro PC (PC-X). As alterações feitas neste PC foram guardadas em Backup (cópia de 20/10 12:00). Feche e volte a abrir o sistema."
+            )
         );
         // a alteração por gravar ficou numa versão e o pendente foi removido
-        assert_eq!(versao_com(&raiz, "AA-00-AA").as_deref(), Some("frota_2026-10-20_1200.db"));
+        assert_eq!(
+            versao_com(&raiz, "AA-00-AA").as_deref(),
+            Some("frota_2026-10-20_1200.db")
+        );
         assert!(!e.caminhos().pendente.exists());
         // não grava por cima dos dados do outro PC
         e.tick(s(40));
         let banco = e.caminhos().banco.clone();
         assert!(!banco.exists() || carros_no_banco(&banco) == 0);
-        assert_eq!(inserir(&e, s(41), "BB-11-BB").unwrap_err().codigo, "so_consulta");
+        assert_eq!(
+            inserir(&e, s(41), "BB-11-BB").unwrap_err().codigo,
+            "so_consulta"
+        );
         e.fechar(s(50).date(), s(50)).unwrap();
-        assert!(std::fs::read_to_string(&lock_p).unwrap().starts_with("PC-X\n"));
+        assert!(
+            std::fs::read_to_string(&lock_p)
+                .unwrap()
+                .starts_with("PC-X\n")
+        );
         assert!(!banco.exists() || carros_no_banco(&banco) == 0);
     }
 
@@ -879,7 +943,12 @@ mod testes {
         e.restaurar_versao("frota_2026-10-20.db", s(20)).unwrap();
         assert_eq!(e.arranque(), Arranque::Ok);
         // sem "cópia de segurança" de uma base vazia
-        let nomes: Vec<_> = e.listar_versoes().unwrap().into_iter().map(|v| v.nome).collect();
+        let nomes: Vec<_> = e
+            .listar_versoes()
+            .unwrap()
+            .into_iter()
+            .map(|v| v.nome)
+            .collect();
         assert_eq!(nomes, vec!["frota_2026-10-20.db"]);
         assert!(raiz.join("dados").join("frota.lock").exists());
         assert_eq!(carros_no_banco(&banco), 1);
@@ -939,7 +1008,10 @@ mod testes {
         // o banco continua com os dados do PC-X
         assert!(tem(&banco, "A1") && tem(&banco, "X1") && !tem(&banco, "A2"));
         // a alteração do PC-A ficou numa versão
-        assert_eq!(versao_com(&raiz, "A2").as_deref(), Some("frota_2026-10-20_1205.db"));
+        assert_eq!(
+            versao_com(&raiz, "A2").as_deref(),
+            Some("frota_2026-10-20_1205.db")
+        );
         let est = a2.armazenamento();
         assert_eq!(
             est.aviso_arranque.as_deref(),
@@ -968,7 +1040,10 @@ mod testes {
         drop(a);
         let (a2, _) = Estado::arrancar(&raiz, &local.join("a"), "PC-A", s(300));
         let esperado = format!("{MSG_CONFLITO}20/10 12:05). Feche e volte a abrir o sistema.");
-        assert_eq!(a2.armazenamento().aviso_arranque.as_deref(), Some(esperado.as_str()));
+        assert_eq!(
+            a2.armazenamento().aviso_arranque.as_deref(),
+            Some(esperado.as_str())
+        );
         // uma gravação bem-sucedida não apaga o aviso
         inserir(&a2, s(301), "A3").unwrap();
         a2.tick(s(304));
@@ -988,7 +1063,10 @@ mod testes {
         let (e, a) = Estado::arrancar(&raiz, &local.join("y"), "PC-Y", s(5));
         assert_eq!(a, Arranque::Bloqueado { pc: "PC-X".into() });
         // ainda bloqueado
-        assert_eq!(e.tentar_arranque(s(6)), Arranque::Bloqueado { pc: "PC-X".into() });
+        assert_eq!(
+            e.tentar_arranque(s(6)),
+            Arranque::Bloqueado { pc: "PC-X".into() }
+        );
         x.fechar(s(7).date(), s(7)).unwrap();
         assert_eq!(e.tentar_arranque(s(8)), Arranque::Ok);
         assert_eq!(e.arranque(), Arranque::Ok);
@@ -1011,7 +1089,10 @@ mod testes {
         }
         let (e, _) = Estado::arrancar(&raiz, &local.join("y"), "PC-Y", s(5));
         e.abrir_consulta().unwrap();
-        assert_eq!(e.tentar_arranque(s(6)), Arranque::Bloqueado { pc: "PC-X".into() });
+        assert_eq!(
+            e.tentar_arranque(s(6)),
+            Arranque::Bloqueado { pc: "PC-X".into() }
+        );
         assert!(e.armazenamento().so_consulta);
     }
 
@@ -1035,7 +1116,10 @@ mod testes {
             Some(format!("{MSG_CONFLITO}20/10 12:03). Feche e volte a abrir o sistema.").as_str())
         );
         assert!(tem(&banco, "X1") && !tem(&banco, "A2"));
-        assert_eq!(versao_com(&raiz, "A2").as_deref(), Some("frota_2026-10-20_1203.db"));
+        assert_eq!(
+            versao_com(&raiz, "A2").as_deref(),
+            Some("frota_2026-10-20_1203.db")
+        );
         assert!(!local.join("a").join("pendente").exists());
         assert_eq!(inserir(&a, s(206), "A3").unwrap_err().codigo, "so_consulta");
         a.fechar(s(207).date(), s(207)).unwrap();
@@ -1075,7 +1159,8 @@ mod testes {
         let dados = raiz.join("dados");
         std::fs::create_dir_all(&dados).unwrap();
         let c = Connection::open(dados.join("frota.db")).unwrap();
-        c.execute_batch("CREATE TABLE x(a); PRAGMA user_version = 99;").unwrap();
+        c.execute_batch("CREATE TABLE x(a); PRAGMA user_version = 99;")
+            .unwrap();
         drop(c);
         let (e, a) = Estado::arrancar(&raiz, &local, "PC-A", t0());
         assert_eq!(a, Arranque::VersaoMaisRecente);
@@ -1102,7 +1187,10 @@ mod testes {
         let banco = e.caminhos().banco.clone();
         assert_eq!(carros_no_banco(&banco), 1);
         assert!(!e.caminhos().pendente.exists());
-        let antes = raiz.join("dados").join("versoes").join("frota_antes-da-v1.3.0.db");
+        let antes = raiz
+            .join("dados")
+            .join("versoes")
+            .join("frota_antes-da-v1.3.0.db");
         assert_eq!(carros_no_banco(&antes), 1);
         // continua aberto normalmente (se a troca falhar, a app continua)
         assert!(!e.armazenamento().so_consulta);
@@ -1124,7 +1212,13 @@ mod testes {
         let err = a.gravar_antes_de_atualizar("1.3.0", s(202)).unwrap_err();
         assert_eq!(err.codigo, "conflito");
         assert!(tem(&banco, "X1") && !tem(&banco, "A2"));
-        assert!(!raiz.join("dados").join("versoes").join("frota_antes-da-v1.3.0.db").exists());
+        assert!(
+            !raiz
+                .join("dados")
+                .join("versoes")
+                .join("frota_antes-da-v1.3.0.db")
+                .exists()
+        );
     }
 
     #[test]
@@ -1137,7 +1231,12 @@ mod testes {
         }
         let (e, _) = Estado::arrancar(&raiz, &local.join("y"), "PC-Y", s(5));
         e.abrir_consulta().unwrap();
-        assert_eq!(e.gravar_antes_de_atualizar("1.3.0", s(6)).unwrap_err().codigo, "so_consulta");
+        assert_eq!(
+            e.gravar_antes_de_atualizar("1.3.0", s(6))
+                .unwrap_err()
+                .codigo,
+            "so_consulta"
+        );
     }
 
     #[test]

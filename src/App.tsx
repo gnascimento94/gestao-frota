@@ -120,7 +120,6 @@ function Concha() {
         <header className="topo">
           <div className="topo-titulos">
             <h1 className="topo-titulo">{titulo}</h1>
-            
           </div>
           <label className="busca">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -203,4 +202,3 @@ function Concha() {
     </div>
   )
 }
-

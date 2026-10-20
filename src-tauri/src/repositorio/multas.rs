@@ -338,18 +338,14 @@ pub fn multas_motorista(
             COALESCE(SUM(CASE WHEN data_infracao >= ?2 THEN pontos ELSE 0 END), 0)
          FROM multas WHERE motorista_id = ?1"
     );
-    Ok(conn.query_row(
-        &sql,
-        params![motorista_id, limite],
-        |r| {
-            Ok(ResumoMultasMotorista {
-                n: r.get(0)?,
-                total: r.get(1)?,
-                empresa: r.get(2)?,
-                colaborador: r.get(3)?,
-                por_reembolsar: r.get(4)?,
-                pontos_3_anos: r.get(5)?,
-            })
-        },
-    )?)
+    Ok(conn.query_row(&sql, params![motorista_id, limite], |r| {
+        Ok(ResumoMultasMotorista {
+            n: r.get(0)?,
+            total: r.get(1)?,
+            empresa: r.get(2)?,
+            colaborador: r.get(3)?,
+            por_reembolsar: r.get(4)?,
+            pontos_3_anos: r.get(5)?,
+        })
+    })?)
 }

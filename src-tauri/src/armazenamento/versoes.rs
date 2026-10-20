@@ -1,6 +1,6 @@
+use crate::armazenamento::gravacao::{Caminhos, gravar, integridade_ok};
 use crate::erro::{Erro, Res};
-use crate::migracoes::{migrar, MIGRACOES};
-use crate::armazenamento::gravacao::{integridade_ok, gravar, Caminhos};
+use crate::migracoes::{MIGRACOES, migrar};
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime};
 use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
@@ -62,8 +62,7 @@ fn tmp_de(destino: &Path) -> PathBuf {
 /// Copia o ficheiro `banco` (sempre substituído atomicamente, logo consistente).
 fn copiar_banco(c: &Caminhos, destino: &Path) -> Res<()> {
     let tmp = tmp_de(destino);
-    let r = std::fs::copy(&c.banco, &tmp)
-        .and_then(|_| std::fs::rename(&tmp, destino));
+    let r = std::fs::copy(&c.banco, &tmp).and_then(|_| std::fs::rename(&tmp, destino));
     if r.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -244,9 +243,15 @@ fn contagens(p: &Path) -> (i64, i64) {
 /// `AAAA-MM-DD` (diária), `AAAA-MM-DD HH:MM` (manual) ou a modificação (antes-da).
 fn data_de(nome: &str, mtime: SystemTime) -> String {
     if let Some((d, h, _)) = parse_datada(nome) {
-        return if h.is_empty() { d } else { format!("{d} {}:{}", &h[..2], &h[2..]) };
+        return if h.is_empty() {
+            d
+        } else {
+            format!("{d} {}:{}", &h[..2], &h[2..])
+        };
     }
-    DateTime::<Local>::from(mtime).format("%Y-%m-%d %H:%M").to_string()
+    DateTime::<Local>::from(mtime)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
@@ -267,11 +272,16 @@ pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
 }
 
 fn versao_invalida() -> Erro {
-    Erro { campo: None, codigo: "versao_invalida".into(), mensagem: "Versão inválida.".into() }
+    Erro {
+        campo: None,
+        codigo: "versao_invalida".into(),
+        mensagem: "Versão inválida.".into(),
+    }
 }
 
 fn corrompida() -> Erro {
-    Erro { campo: None,
+    Erro {
+        campo: None,
         codigo: "corrompido".into(),
         mensagem: "A versão escolhida parece estar danificada. Nada foi alterado.".into(),
     }
@@ -304,7 +314,10 @@ pub fn restaurar(
     let origem_conn = match Connection::open_with_flags(&origem, OpenFlags::SQLITE_OPEN_READ_ONLY) {
         Ok(x) => x,
         Err(rusqlite::Error::SqliteFailure(f, _))
-            if matches!(f.code, rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt) =>
+            if matches!(
+                f.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+            ) =>
         {
             return Err(corrompida());
         }
@@ -334,7 +347,8 @@ pub fn restaurar(
     }
     drop(origem_conn);
     if !integridade_ok(conn)? {
-        return Err(Erro { campo: None,
+        return Err(Erro {
+            campo: None,
             codigo: "corrompido".into(),
             mensagem: "A restauração não passou a verificação de integridade.".into(),
         });
@@ -418,9 +432,14 @@ mod testes {
             // mtime crescente e determinístico
             let f = std::fs::OpenOptions::new()
                 .write(true)
-                .open(c.dados.join("versoes").join(format!("frota_antes-da-v1.0.{i}.db")))
+                .open(
+                    c.dados
+                        .join("versoes")
+                        .join(format!("frota_antes-da-v1.0.{i}.db")),
+                )
                 .unwrap();
-            f.set_times(FileTimes::new().set_modified(base + Duration::from_secs(i * 10))).unwrap();
+            f.set_times(FileTimes::new().set_modified(base + Duration::from_secs(i * 10)))
+                .unwrap();
         }
         let n = nomes(&c, "frota_antes-da-");
         assert_eq!(n.len(), 5);
@@ -436,7 +455,11 @@ mod testes {
             copia_antes_de(&c, &format!("1.0.{i}")).unwrap();
             let f = std::fs::OpenOptions::new()
                 .write(true)
-                .open(c.dados.join("versoes").join(format!("frota_antes-da-v1.0.{i}.db")))
+                .open(
+                    c.dados
+                        .join("versoes")
+                        .join(format!("frota_antes-da-v1.0.{i}.db")),
+                )
                 .unwrap();
             f.set_modified(futuro + Duration::from_secs(i)).unwrap();
         }
@@ -453,7 +476,10 @@ mod testes {
             copia_diaria(&c, dia(i)).unwrap();
         }
         // uma cópia manual com data mais antiga que todas as diárias
-        let velho = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap().and_hms_opt(9, 5, 0).unwrap();
+        let velho = NaiveDate::from_ymd_opt(2020, 1, 1)
+            .unwrap()
+            .and_hms_opt(9, 5, 0)
+            .unwrap();
         copia_manual(&conn, &c, velho).unwrap();
         let n = nomes(&c, "frota_2");
         assert_eq!(n.len(), 30);
@@ -486,10 +512,21 @@ mod testes {
         gravar(&conn, &c).unwrap();
         copia_diaria(&c, dia(0)).unwrap();
         copia_diaria(&c, dia(1)).unwrap();
-        std::fs::write(c.dados.join("versoes").join("frota_2025-12-31.db"), vec![0xABu8; 4096]).unwrap();
+        std::fs::write(
+            c.dados.join("versoes").join("frota_2025-12-31.db"),
+            vec![0xABu8; 4096],
+        )
+        .unwrap();
         let l = listar(&c).unwrap();
         let ns: Vec<_> = l.iter().map(|v| v.nome.as_str()).collect();
-        assert_eq!(ns, vec!["frota_2026-01-02.db", "frota_2026-01-01.db", "frota_2025-12-31.db"]);
+        assert_eq!(
+            ns,
+            vec![
+                "frota_2026-01-02.db",
+                "frota_2026-01-01.db",
+                "frota_2025-12-31.db"
+            ]
+        );
         assert_eq!(l[0].data, "2026-01-02");
         assert_eq!((l[0].carros, l[0].lancamentos), (1, 1));
         assert_eq!((l[2].carros, l[2].lancamentos), (-1, -1));
@@ -504,13 +541,21 @@ mod testes {
         inserir_carro(&conn, "BB-11-BB");
         let t2 = dia(0).and_hms_opt(11, 0, 0).unwrap();
         restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", true, t2).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
-        let seg = listar(&c).unwrap().into_iter().find(|v| v.nome == "frota_2026-01-01_1100.db").unwrap();
+        let seg = listar(&c)
+            .unwrap()
+            .into_iter()
+            .find(|v| v.nome == "frota_2026-01-01_1100.db")
+            .unwrap();
         assert_eq!(seg.carros, 2);
         // e foi gravado no banco partilhado
         let b = Connection::open(&c.banco).unwrap();
-        let n: i64 = b.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = b
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
         assert!(!c.pendente.exists());
     }
@@ -520,13 +565,18 @@ mod testes {
         let (_t, c, conn) = cenario();
         inserir_carro(&conn, "AA-00-AA");
         let t1 = dia(0).and_hms_opt(10, 0, 0).unwrap();
-        assert_eq!(copia_manual(&conn, &c, t1).unwrap(), "frota_2026-01-01_1000.db");
+        assert_eq!(
+            copia_manual(&conn, &c, t1).unwrap(),
+            "frota_2026-01-01_1000.db"
+        );
         let mut vazia = Connection::open_in_memory().unwrap();
         let t2 = dia(0).and_hms_opt(11, 0, 0).unwrap();
         restaurar(&mut vazia, &c, "frota_2026-01-01_1000.db", false, t2).unwrap();
         let ns: Vec<_> = listar(&c).unwrap().into_iter().map(|v| v.nome).collect();
         assert_eq!(ns, vec!["frota_2026-01-01_1000.db"]);
-        let n: i64 = vazia.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = vazia
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
     }
 
@@ -543,13 +593,26 @@ mod testes {
         restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", true, t1).unwrap();
         restaurar(&mut conn, &c, "frota_2026-01-01_1001.db", true, t2).unwrap();
         let l = listar(&c).unwrap();
-        let a = l.iter().find(|v| v.nome == "frota_2026-01-01_1100.db").unwrap();
-        let b = l.iter().find(|v| v.nome == "frota_2026-01-01_1100-2.db").unwrap();
+        let a = l
+            .iter()
+            .find(|v| v.nome == "frota_2026-01-01_1100.db")
+            .unwrap();
+        let b = l
+            .iter()
+            .find(|v| v.nome == "frota_2026-01-01_1100-2.db")
+            .unwrap();
         assert_eq!(a.carros, 3); // estado B preservado
         assert_eq!(b.carros, 1); // estado após a 1.ª restauração
         assert_eq!(b.data, "2026-01-01 11:00");
         // e o sufixo é restaurável
-        restaurar(&mut conn, &c, "frota_2026-01-01_1100-2.db", true, dia(0).and_hms_opt(11, 5, 0).unwrap()).unwrap();
+        restaurar(
+            &mut conn,
+            &c,
+            "frota_2026-01-01_1100-2.db",
+            true,
+            dia(0).and_hms_opt(11, 5, 0).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -561,8 +624,17 @@ mod testes {
             copia_diaria(&c, dia(i)).unwrap();
         }
         inserir_carro(&conn, "BB-11-BB");
-        restaurar(&mut conn, &c, "frota_2026-01-01.db", true, dia(40).and_hms_opt(9, 0, 0).unwrap()).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        restaurar(
+            &mut conn,
+            &c,
+            "frota_2026-01-01.db",
+            true,
+            dia(40).and_hms_opt(9, 0, 0).unwrap(),
+        )
+        .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
         let ns = nomes(&c, "frota_2");
         assert_eq!(ns.len(), 30);
@@ -576,7 +648,14 @@ mod testes {
         let (_t, c, _conn) = cenario();
         copia_diaria(&c, dia(0)).unwrap();
         let v = c.dados.join("versoes");
-        for n in ["frota_2é.db", "frota_2026-01-01_é.db", "frota_2.db", "frota_2026-01-0_1230.db", "frota_2026-01-01_12.db", "frota_2026-01-01_1230-x.db"] {
+        for n in [
+            "frota_2é.db",
+            "frota_2026-01-01_é.db",
+            "frota_2.db",
+            "frota_2026-01-0_1230.db",
+            "frota_2026-01-01_12.db",
+            "frota_2026-01-01_1230-x.db",
+        ] {
             std::fs::write(v.join(n), b"x").unwrap();
         }
         let l = listar(&c).unwrap();
@@ -589,8 +668,18 @@ mod testes {
         inserir_carro(&conn, "AA-00-AA");
         copia_manual(&conn, &c, dia(0).and_hms_opt(10, 0, 0).unwrap()).unwrap();
         let p = c.dados.join("versoes").join("frota_2026-01-01_1000.db");
-        Connection::open(&p).unwrap().execute_batch("PRAGMA user_version=99").unwrap();
-        let e = restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", true, dia(1).and_hms_opt(10, 0, 0).unwrap()).unwrap_err();
+        Connection::open(&p)
+            .unwrap()
+            .execute_batch("PRAGMA user_version=99")
+            .unwrap();
+        let e = restaurar(
+            &mut conn,
+            &c,
+            "frota_2026-01-01_1000.db",
+            true,
+            dia(1).and_hms_opt(10, 0, 0).unwrap(),
+        )
+        .unwrap_err();
         assert_eq!(e.codigo, "versao_mais_recente");
         assert_eq!(nomes(&c, "frota_2").len(), 1);
     }
@@ -612,12 +701,21 @@ mod testes {
         let (_t, c, mut conn) = cenario();
         inserir_carro(&conn, "AA-00-AA");
         let t = dia(0).and_hms_opt(10, 0, 0).unwrap();
-        for nome in ["..\\frota.db", "../frota.db", "a/b.db", "", "..", "inexistente.db"] {
+        for nome in [
+            "..\\frota.db",
+            "../frota.db",
+            "a/b.db",
+            "",
+            "..",
+            "inexistente.db",
+        ] {
             let e = restaurar(&mut conn, &c, nome, true, t).unwrap_err();
             assert_eq!(e.codigo, "versao_invalida", "{nome}");
         }
         assert!(listar(&c).unwrap().is_empty());
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
     }
 
@@ -626,12 +724,18 @@ mod testes {
         let (_t, c, mut conn) = cenario();
         inserir_carro(&conn, "AA-00-AA");
         std::fs::create_dir_all(c.dados.join("versoes")).unwrap();
-        std::fs::write(c.dados.join("versoes").join("frota_2025-12-31.db"), vec![0xABu8; 4096]).unwrap();
+        std::fs::write(
+            c.dados.join("versoes").join("frota_2025-12-31.db"),
+            vec![0xABu8; 4096],
+        )
+        .unwrap();
         let t = dia(0).and_hms_opt(10, 0, 0).unwrap();
         let e = restaurar(&mut conn, &c, "frota_2025-12-31.db", true, t).unwrap_err();
         assert_eq!(e.codigo, "corrompido");
         assert_eq!(nomes(&c, "frota_2").len(), 1); // sem cópia de segurança
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
     }
 }

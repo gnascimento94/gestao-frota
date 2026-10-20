@@ -55,7 +55,11 @@ pub struct Latest {
 }
 
 fn erro(codigo: &str, mensagem: impl Into<String>) -> Erro {
-    Erro { campo: None, codigo: codigo.into(), mensagem: mensagem.into() }
+    Erro {
+        campo: None,
+        codigo: codigo.into(),
+        mensagem: mensagem.into(),
+    }
 }
 
 fn invalida() -> Erro {
@@ -75,7 +79,9 @@ pub fn nova_versao(atual: &str, json: &str) -> Option<Latest> {
 
 /// Base64 → texto (formato do `tauri signer`).
 fn texto_b64(s: &str) -> Option<String> {
-    let b = base64::engine::general_purpose::STANDARD.decode(s.trim()).ok()?;
+    let b = base64::engine::general_purpose::STANDARD
+        .decode(s.trim())
+        .ok()?;
     String::from_utf8(b).ok()
 }
 
@@ -84,7 +90,10 @@ fn chave(s: &str) -> Option<PublicKey> {
 }
 
 fn sha256_hex(b: &[u8]) -> String {
-    Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect()
+    Sha256::digest(b)
+        .iter()
+        .map(|x| format!("{x:02x}"))
+        .collect()
 }
 
 /// Versão a que a assinatura está ligada (`version:` do comentário de confiança).
@@ -146,7 +155,9 @@ fn trocar_com(
                     "A atualização ficou a meio: o programa atual está em «{}» e a versão nova em «{}». Renomeie um deles para «{}» para voltar a abrir o programa.",
                     old.display(),
                     novo.display(),
-                    exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                    exe.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default()
                 ),
             ));
         }
@@ -159,7 +170,9 @@ fn trocar_com(
 /// troca dos executáveis. Em qualquer falha apaga `novo`, exceto se a troca
 /// ficou a meio (`troca_incompleta`: é o único executável novo que existe).
 pub fn instalar(exe: &Path, novo: &Path, gravar: impl FnOnce() -> Res<()>) -> Res<()> {
-    instalar_com(exe, novo, gravar, |a: &Path, b: &Path| std::fs::rename(a, b))
+    instalar_com(exe, novo, gravar, |a: &Path, b: &Path| {
+        std::fs::rename(a, b)
+    })
 }
 
 fn instalar_com(
@@ -198,7 +211,11 @@ fn agente(global: Duration) -> ureq::Agent {
 /// `latest.json` da última Release (timeout 5 s); qualquer erro → `None`.
 fn obter_latest() -> Option<String> {
     let mut r = agente(TIMEOUT_LATEST).get(URL_LATEST).call().ok()?;
-    r.body_mut().with_config().limit(1024 * 1024).read_to_string().ok()
+    r.body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_string()
+        .ok()
 }
 
 fn descarregar(url: &str) -> Res<Vec<u8>> {
@@ -206,7 +223,10 @@ fn descarregar(url: &str) -> Res<Vec<u8>> {
         return Err(invalida());
     }
     let falha = |e: ureq::Error| {
-        erro("sem_ligacao", format!("Não foi possível descarregar a atualização ({e})."))
+        erro(
+            "sem_ligacao",
+            format!("Não foi possível descarregar a atualização ({e})."),
+        )
     };
     let mut r = agente(TIMEOUT_DOWNLOAD).get(url).call().map_err(falha)?;
     let mut bytes = Vec::new();
@@ -215,7 +235,12 @@ fn descarregar(url: &str) -> Res<Vec<u8>> {
         .limit(MAX_EXE)
         .reader()
         .read_to_end(&mut bytes)
-        .map_err(|e| erro("sem_ligacao", format!("Não foi possível descarregar a atualização ({e}).")))?;
+        .map_err(|e| {
+            erro(
+                "sem_ligacao",
+                format!("Não foi possível descarregar a atualização ({e})."),
+            )
+        })?;
     Ok(bytes)
 }
 
@@ -290,7 +315,10 @@ mod testes {
         assert!(nova_versao("1.3.0", json("1.3.0")).is_none());
         assert!(nova_versao("1.3.0", json("1.2.9")).is_none());
         assert!(nova_versao("1.0.0", "lixo").is_none());
-        assert_eq!(nova_versao("1.2.0", json("1.10.0")).unwrap().versao, "1.10.0");
+        assert_eq!(
+            nova_versao("1.2.0", json("1.10.0")).unwrap().versao,
+            "1.10.0"
+        );
         assert!(nova_versao("1.0.0", json("nao-e-versao")).is_none());
     }
 
@@ -312,7 +340,10 @@ mod testes {
         // assinatura ilegível
         let mut l = latest_valido();
         l.assinatura = "lixo".into();
-        assert_eq!(validar(CONTEUDO, &l, CHAVE_TESTE).unwrap_err().codigo, "atualizacao_invalida");
+        assert_eq!(
+            validar(CONTEUDO, &l, CHAVE_TESTE).unwrap_err().codigo,
+            "atualizacao_invalida"
+        );
     }
 
     #[test]
@@ -330,7 +361,10 @@ mod testes {
         // versão com o mesmo binário (p.ex. um binário antigo) é recusado
         let mut l = latest_valido();
         l.versao = "10.0.0".into();
-        assert_eq!(validar(CONTEUDO, &l, CHAVE_TESTE).unwrap_err().codigo, "atualizacao_invalida");
+        assert_eq!(
+            validar(CONTEUDO, &l, CHAVE_TESTE).unwrap_err().codigo,
+            "atualizacao_invalida"
+        );
     }
 
     #[test]
@@ -386,12 +420,29 @@ mod testes {
             }
         };
         let gravou = std::cell::Cell::new(false);
-        let e = instalar_com(&exe, &novo, || { gravou.set(true); Ok(()) }, renomear).unwrap_err();
+        let e = instalar_com(
+            &exe,
+            &novo,
+            || {
+                gravou.set(true);
+                Ok(())
+            },
+            renomear,
+        )
+        .unwrap_err();
         assert!(gravou.get());
         assert_eq!(chamada.get(), 3);
         assert_eq!(e.codigo, "troca_incompleta");
-        assert!(e.mensagem.contains(&old.display().to_string()), "{}", e.mensagem);
-        assert!(e.mensagem.contains(&novo.display().to_string()), "{}", e.mensagem);
+        assert!(
+            e.mensagem.contains(&old.display().to_string()),
+            "{}",
+            e.mensagem
+        );
+        assert!(
+            e.mensagem.contains(&novo.display().to_string()),
+            "{}",
+            e.mensagem
+        );
         // nenhum executável é apagado
         assert_eq!(std::fs::read_to_string(&old).unwrap(), "v1");
         assert_eq!(std::fs::read_to_string(&novo).unwrap(), "v2");
@@ -405,7 +456,10 @@ mod testes {
         std::fs::write(&exe, "v1").unwrap();
         std::fs::write(&novo, "v2").unwrap();
         let conflito = || Err(erro("conflito", "outro PC"));
-        let e = instalar_com(&exe, &novo, conflito, |a: &Path, b: &Path| std::fs::rename(a, b)).unwrap_err();
+        let e = instalar_com(&exe, &novo, conflito, |a: &Path, b: &Path| {
+            std::fs::rename(a, b)
+        })
+        .unwrap_err();
         assert_eq!(e.codigo, "conflito");
         assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v1");
         assert!(!novo.exists());
@@ -422,7 +476,11 @@ mod testes {
         let chamada = std::cell::Cell::new(0);
         let renomear = |de: &Path, para: &Path| {
             chamada.set(chamada.get() + 1);
-            if chamada.get() == 2 { Err(std::io::Error::other("simulado")) } else { std::fs::rename(de, para) }
+            if chamada.get() == 2 {
+                Err(std::io::Error::other("simulado"))
+            } else {
+                std::fs::rename(de, para)
+            }
         };
         let e = instalar_com(&exe, &novo, || Ok(()), renomear).unwrap_err();
         assert_ne!(e.codigo, "troca_incompleta");
@@ -440,7 +498,8 @@ mod testes {
         assert_eq!(e.codigo, "atualizacao_invalida");
         assert!(!novo.exists());
         // de outra chave também
-        let e = guardar_e_validar(&novo, CONTEUDO, &latest_valido(), OUTRA_CHAVE_TESTE).unwrap_err();
+        let e =
+            guardar_e_validar(&novo, CONTEUDO, &latest_valido(), OUTRA_CHAVE_TESTE).unwrap_err();
         assert_eq!(e.codigo, "atualizacao_invalida");
         assert!(!novo.exists());
         // válido: fica

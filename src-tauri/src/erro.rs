@@ -40,12 +40,20 @@ pub type Res<T> = Result<T, Erro>;
 
 impl From<rusqlite::Error> for Erro {
     fn from(e: rusqlite::Error) -> Self {
-        Erro { campo: None, codigo: "bd".into(), mensagem: e.to_string() }
+        Erro {
+            campo: None,
+            codigo: "bd".into(),
+            mensagem: e.to_string(),
+        }
     }
 }
 
 impl From<std::io::Error> for Erro {
     fn from(e: std::io::Error) -> Self {
-        Erro { campo: None, codigo: "io".into(), mensagem: e.to_string() }
+        Erro {
+            campo: None,
+            codigo: "io".into(),
+            mensagem: e.to_string(),
+        }
     }
 }

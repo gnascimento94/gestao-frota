@@ -37,7 +37,8 @@ fn banco_vazio() -> Erro {
 }
 
 fn gravacao_falhou(e: impl std::fmt::Display) -> Erro {
-    Erro { campo: None,
+    Erro {
+        campo: None,
         codigo: "gravacao_falhou".into(),
         mensagem: format!(
             "Não foi possível guardar na pasta de dados. Os dados estão seguros neste computador; vou tentar outra vez. ({e})"
@@ -75,7 +76,10 @@ fn limpar_trabalho(trabalho: &Path, incluir_principal: bool) -> Res<()> {
 }
 
 fn codigo_corrompido(f: &rusqlite::ffi::Error) -> bool {
-    matches!(f.code, rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+    matches!(
+        f.code,
+        rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+    )
 }
 
 pub(crate) fn integridade_ok(conn: &Connection) -> Res<bool> {
@@ -123,7 +127,7 @@ pub fn preparar_trabalho(c: &Caminhos) -> Res<Connection> {
     let mut conn = match Connection::open(&c.trabalho) {
         Ok(conn) => conn,
         Err(rusqlite::Error::SqliteFailure(f, _)) if codigo_corrompido(&f) => {
-            return Err(corrompido())
+            return Err(corrompido());
         }
         Err(e) => return Err(e.into()),
     };
@@ -145,7 +149,8 @@ fn escrever_tmp(conn: &Connection, tmp: &Path) -> Res<()> {
         std::fs::remove_file(tmp).map_err(gravacao_falhou)?;
     }
     let destino = tmp.to_string_lossy().into_owned();
-    conn.execute("VACUUM INTO ?1", [destino]).map_err(gravacao_falhou)?;
+    conn.execute("VACUUM INTO ?1", [destino])
+        .map_err(gravacao_falhou)?;
     // Flush para disco antes da substituição atómica.
     std::fs::OpenOptions::new()
         .write(true)
@@ -153,11 +158,14 @@ fn escrever_tmp(conn: &Connection, tmp: &Path) -> Res<()> {
         .and_then(|f| f.sync_all())
         .map_err(gravacao_falhou)?;
     // Nunca substituir um bom ficheiro por um instantâneo mau.
-    let chk = Connection::open_with_flags(tmp, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(gravacao_falhou)?;
+    let chk = Connection::open_with_flags(tmp, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(gravacao_falhou)?;
     let ok = integridade_ok(&chk).map_err(|e| gravacao_falhou(e.mensagem))?;
     drop(chk);
     if !ok {
-        return Err(gravacao_falhou("a cópia temporária falhou a verificação de integridade"));
+        return Err(gravacao_falhou(
+            "a cópia temporária falhou a verificação de integridade",
+        ));
     }
     Ok(())
 }
@@ -197,7 +205,8 @@ mod testes {
 
     fn contar(p: &Path) -> i64 {
         let conn = Connection::open_with_flags(p, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap()
+        conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap()
     }
 
     #[test]
@@ -206,7 +215,9 @@ mod testes {
         let conn = preparar_trabalho(&c).unwrap();
         assert!(c.dados.exists());
         assert!(c.trabalho.exists());
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -249,7 +260,9 @@ mod testes {
         drop(conn);
         std::fs::write(&c.pendente, b"").unwrap();
         let conn = preparar_trabalho(&c).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 2);
         assert_eq!(contar(&c.banco), 2);
         assert!(!c.pendente.exists());
@@ -278,7 +291,9 @@ mod testes {
         let journal = com_sufixo(&c.trabalho, "-journal");
         std::fs::write(&journal, b"lixo").unwrap();
         let conn = preparar_trabalho(&c).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
         assert!(!journal.exists());
     }
@@ -293,7 +308,9 @@ mod testes {
         std::fs::write(&journal, b"lixo").unwrap();
         assert!(!c.banco.exists() && !c.pendente.exists());
         let conn = preparar_trabalho(&c).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
         assert!(!journal.exists());
     }
@@ -323,7 +340,9 @@ mod testes {
         marcar_pendente(&c).unwrap();
         drop(conn);
         let conn = preparar_trabalho(&c).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 2);
         assert_eq!(contar(&c.banco), 2);
         assert!(!c.pendente.exists());
@@ -339,7 +358,9 @@ mod testes {
         std::fs::create_dir_all(com_sufixo(&c.banco, ".tmp")).unwrap();
         std::fs::write(&c.pendente, b"").unwrap();
         let conn = preparar_trabalho(&c).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
         assert!(c.pendente.exists());
     }

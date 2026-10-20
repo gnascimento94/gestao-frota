@@ -19,7 +19,8 @@ use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 pub(crate) fn erro(codigo: &str, mensagem: impl Into<String>) -> Erro {
-    Erro { campo: None,
+    Erro {
+        campo: None,
         codigo: codigo.into(),
         mensagem: mensagem.into(),
     }
