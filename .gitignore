@@ -1,11 +1,11 @@
-﻿dados/
+dados/
 *.db
 node_modules/
 target/
 dist/
-
-
 dist-ssr
 *.local
 .vscode/*
 !.vscode/extensions.json
+.superpowers/
+Logo.cdr
