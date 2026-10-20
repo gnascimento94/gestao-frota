@@ -4,6 +4,8 @@ mod armazenamento;
 mod erro;
 #[allow(dead_code)]
 mod migracoes;
+#[allow(dead_code)]
+mod regras;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
