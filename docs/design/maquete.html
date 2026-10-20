@@ -1,0 +1,422 @@
+<title>Ecrãs da Frota</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: desktop window mock (translucent sidebar + content) on a soft wallpaper; stacks to one column on phones. */
+:root{
+  --wall-a:#dfe6ee; --wall-b:#eef0f4;
+  --bg:#f5f6f8; --surface:#ffffff; --side:rgba(236,239,244,.78); --line:rgba(30,40,60,.09);
+  --fg:#1c1f24; --fg2:#5d6470; --fg3:#8a909b;
+  --accent:#0071e3; --accent-soft:rgba(0,113,227,.10);
+  --red:#e5352b; --red-soft:rgba(229,53,43,.10); --orange:#e98300; --orange-soft:rgba(233,131,0,.12);
+  --green:#1f9d55; --logo:#2b2b2b;
+  --shadow-win:0 30px 80px rgba(20,30,50,.18),0 2px 6px rgba(20,30,50,.08);
+  --shadow-sheet:-20px 0 60px rgba(20,30,50,.18);
+  --f-ui:"Segoe UI Variable Text","Segoe UI Variable","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --f-display:"Segoe UI Variable Display","Segoe UI Variable","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --wall-a:#1b2230; --wall-b:#121418;
+  --bg:#1a1b1e; --surface:#232428; --side:rgba(40,43,50,.72); --line:rgba(255,255,255,.08);
+  --fg:#f1f2f4; --fg2:#a8adb7; --fg3:#7d828c;
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+  --red:#ff453a; --red-soft:rgba(255,69,58,.15); --orange:#ff9f0a; --orange-soft:rgba(255,159,10,.15);
+  --green:#30d158; --logo:#ffffff;
+  --shadow-win:0 30px 80px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
+  --shadow-sheet:-20px 0 60px rgba(0,0,0,.5);
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --wall-a:#1b2230; --wall-b:#121418;
+  --bg:#1a1b1e; --surface:#232428; --side:rgba(40,43,50,.72); --line:rgba(255,255,255,.08);
+  --fg:#f1f2f4; --fg2:#a8adb7; --fg3:#7d828c;
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+  --red:#ff453a; --red-soft:rgba(255,69,58,.15); --orange:#ff9f0a; --orange-soft:rgba(255,159,10,.15);
+  --green:#30d158; --logo:#ffffff;
+  --shadow-win:0 30px 80px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
+  --shadow-sheet:-20px 0 60px rgba(0,0,0,.5);
+  color-scheme:dark}
+
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 700px at 15% 0%,var(--wall-a),var(--wall-b));color:var(--fg);font:15px/1.45 var(--f-ui);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 40px}
+.nota{max-width:1240px;margin:0 auto 14px;color:var(--fg2);font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.nota b{color:var(--fg);font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--line);font-size:12px}
+
+.win{max-width:1240px;margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:var(--shadow-win);border:1px solid var(--line);
+  display:grid;grid-template-columns:232px 1fr;min-height:760px;position:relative;background:var(--bg)}
+/* sidebar: heavier translucent material */
+.side{background:var(--side);backdrop-filter:blur(30px) saturate(170%);-webkit-backdrop-filter:blur(30px) saturate(170%);
+  border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:4px}
+.marca{display:flex;align-items:center;gap:10px;padding:4px 10px 18px}
+.marca svg{width:34px;height:auto;flex:none}
+.marca svg g{fill:var(--logo)}
+.marca span{font:600 17px/1.1 var(--f-display);letter-spacing:-.01em}
+.marca small{display:block;font:500 11px/1.2 var(--f-ui);color:var(--fg3);letter-spacing:.02em}
+.nav{all:unset;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:var(--fg);font-size:14px;cursor:pointer;transition:background .12s}
+.nav svg{width:18px;height:18px;flex:none;stroke:var(--fg2);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nav:hover{background:var(--line)}
+.nav:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.nav[aria-current="page"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.nav[aria-current="page"] svg{stroke:var(--accent)}
+.nav .n{margin-left:auto;font-size:11px;font-weight:700;color:#fff;background:var(--red);border-radius:999px;padding:1px 7px;font-variant-numeric:tabular-nums}
+.side .grow{flex:1}
+.lancar{all:unset;display:flex;align-items:center;justify-content:center;gap:8px;margin:8px 4px 0;padding:10px 12px;border-radius:10px;background:var(--accent);color:#fff;
+  font-weight:600;font-size:14px;cursor:pointer;transition:transform .1s ease-out,filter .12s}
+.lancar:active{transform:scale(.97)}
+.lancar:hover{filter:brightness(1.07)}
+.lancar:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.lancar kbd{font:500 11px var(--f-ui);opacity:.8;border:1px solid rgba(255,255,255,.4);border-radius:4px;padding:0 4px}
+.estado{font-size:12px;color:var(--fg3);padding:10px 10px 0;display:flex;gap:6px;align-items:center}
+.estado i{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
+
+/* content */
+.main{min-width:0;display:flex;flex-direction:column}
+.topo{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:12px;padding:16px 28px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+.topo h1{margin:0;font:650 26px/1.15 var(--f-display);letter-spacing:-.02em;text-wrap:balance}
+.topo .sub{color:var(--fg3);font-size:13px}
+.busca{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--fg3);font-size:13px;min-width:0}
+.busca svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.busca kbd{font:500 11px var(--f-ui);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.conteudo{padding:6px 28px 32px;display:flex;flex-direction:column;gap:22px}
+
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.kpi{background:var(--surface);border-radius:14px;padding:16px 18px;border:1px solid var(--line)}
+.kpi .l{font-size:12.5px;color:var(--fg2);letter-spacing:.01em}
+.kpi .v{font:650 30px/1.1 var(--f-display);letter-spacing:-.025em;margin-top:6px;font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:17px;font-weight:600;color:var(--fg2);margin-left:2px}
+.kpi .d{font-size:12px;color:var(--fg3);margin-top:4px}
+.kpi.warn .v{color:var(--orange)}
+
+.grid2{display:grid;grid-template-columns:1.25fr 1fr;gap:18px;align-items:start}
+.painel{background:var(--surface);border-radius:14px;border:1px solid var(--line);overflow:hidden;min-width:0}
+.painel h2{margin:0;padding:14px 18px 10px;font:650 15px/1.2 var(--f-display);display:flex;align-items:center;gap:8px}
+.painel h2 .ct{font:600 12px var(--f-ui);color:var(--fg3)}
+.item{display:flex;align-items:center;gap:12px;padding:11px 18px;border-top:1px solid var(--line);cursor:pointer;transition:background .12s}
+.item:hover{background:color-mix(in srgb,var(--line) 60%,transparent)}
+.sev{width:4px;align-self:stretch;border-radius:4px;flex:none}
+.sev.v{background:var(--red)} .sev.p{background:var(--orange)}
+.mat{font:600 12.5px/1 var(--f-ui);letter-spacing:.04em;border:1.5px solid var(--fg);border-radius:5px;padding:4px 6px;white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}
+.mat::before{content:"P";font-size:9px;font-weight:700;color:#fff;background:#1f4fbf;border-radius:2px;padding:1px 3px;margin-right:5px;vertical-align:1px}
+.txt{min-width:0;flex:1}
+.txt b{font-weight:600;display:block;font-size:14px}
+.txt span{font-size:12.5px;color:var(--fg2)}
+.pill{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;flex:none}
+.pill.v{color:var(--red);background:var(--red-soft)} .pill.p{color:var(--orange);background:var(--orange-soft)}
+.ico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;background:var(--accent-soft)}
+.ico svg{width:16px;height:16px;stroke:var(--accent);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.val{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:14px}
+.val.muted{color:var(--fg3);font-weight:500}
+
+/* carros */
+.tabela-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+th{text-align:left;font-size:12px;font-weight:600;color:var(--fg3);padding:10px 18px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:11px 18px;border-bottom:1px solid var(--line);white-space:nowrap}
+td.num,th.num{text-align:right}
+tr:last-child td{border-bottom:0}
+.vazio{padding:60px 20px;text-align:center;color:var(--fg2)}
+.vazio b{display:block;color:var(--fg);font:650 18px var(--f-display);margin-bottom:6px}
+
+/* sheet */
+.scrim{position:absolute;inset:0;background:rgba(10,15,25,.18);opacity:0;pointer-events:none;transition:opacity .25s}
+.scrim.on{opacity:1;pointer-events:auto}
+.folha{position:absolute;top:0;right:0;bottom:0;width:min(440px,100%);background:var(--surface);box-shadow:var(--shadow-sheet);
+  display:flex;flex-direction:column;transform-origin:var(--ox,0) var(--oy,100%);
+  transform:translateX(30px) scale(.94);opacity:0;filter:blur(6px);pointer-events:none;
+  transition:transform .38s cubic-bezier(.2,.9,.25,1),opacity .22s ease,filter .3s ease}
+.folha.on{transform:none;opacity:1;filter:none;pointer-events:auto}
+@media (prefers-reduced-motion: reduce){.folha{transform:none;filter:none;transition:opacity .15s}.scrim{transition:opacity .15s}}
+.folha header{padding:18px 20px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+.folha header h3{margin:0;font:650 19px/1.2 var(--f-display);letter-spacing:-.015em}
+.x{all:unset;margin-left:auto;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--line);cursor:pointer;color:var(--fg2);font-size:16px}
+.x:focus-visible{outline:2px solid var(--accent)}
+.corpo{padding:16px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;flex:1}
+.seg{display:flex;background:var(--line);border-radius:9px;padding:2px;gap:2px}
+.seg button{all:unset;flex:1;text-align:center;padding:6px 4px;border-radius:7px;font-size:13px;color:var(--fg2);cursor:pointer;transition:background .15s,color .15s}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.seg button:focus-visible{outline:2px solid var(--accent)}
+.campo{display:flex;flex-direction:column;gap:5px;min-width:0}
+.campo label{font-size:12.5px;color:var(--fg2);font-weight:500}
+.campo input,.campo select{font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+.campo input:focus,.campo select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.campo .ajuda{font-size:12px;color:var(--fg3)}
+.campo .ajuda.ok{color:var(--green)}
+.campo .ajuda.alerta{color:var(--orange)}
+.campo.erro input{border-color:var(--red);box-shadow:0 0 0 3px var(--red-soft)}
+.campo .msg-erro{font-size:12px;color:var(--red)}
+.linha{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.reparte{background:var(--bg);border-radius:10px;padding:10px 12px;font-size:13px;display:flex;flex-direction:column;gap:8px}
+.barra{height:8px;border-radius:5px;background:var(--orange-soft);overflow:hidden;display:flex}
+.barra i{display:block;background:var(--accent);transition:width .3s cubic-bezier(.2,.9,.25,1)}
+.reparte .t{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.reparte .t b{font-weight:600}
+.interruptor{display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer}
+.interruptor input{appearance:none;width:38px;height:22px;border-radius:999px;background:var(--line);position:relative;cursor:pointer;transition:background .2s;flex:none;margin:0}
+.interruptor input::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.interruptor input:checked{background:var(--green)}
+.interruptor input:checked::after{transform:translateX(16px)}
+.interruptor input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.interruptor small{display:block;color:var(--fg3);font-size:12px}
+.folha footer{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.btn{all:unset;padding:9px 16px;border-radius:9px;font-weight:600;font-size:14px;cursor:pointer;transition:transform .1s ease-out}
+.btn:active{transform:scale(.97)}
+.btn.sec{background:var(--line);color:var(--fg)}
+.btn.pri{background:var(--accent);color:#fff}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.aviso-sec{font-size:12.5px;color:var(--fg2);background:var(--bg);border-radius:10px;padding:10px 12px}
+
+.toast{position:absolute;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;font-size:14px;
+  transition:opacity .2s,transform .3s cubic-bezier(.2,.9,.25,1);pointer-events:none;z-index:5}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+@media (prefers-reduced-transparency: reduce){.side,.topo{backdrop-filter:none;-webkit-backdrop-filter:none}.side{background:var(--bg)}.topo{background:var(--bg)}}
+
+@media (max-width:1000px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.grid2{grid-template-columns:1fr}}
+@media (max-width:760px){
+  .win{grid-template-columns:1fr;min-height:0}
+  .side{flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:1px solid var(--line);padding:10px}
+  .marca{padding:4px 6px;flex-basis:100%}
+  .nav{padding:6px 8px;font-size:13px}
+  .nav .lbl-long{display:none}
+  .side .grow,.estado{display:none}
+  .lancar{margin:0 0 0 auto;padding:7px 12px}
+  .lancar kbd{display:none}
+  .topo,.conteudo{padding-left:16px;padding-right:16px}
+  .busca{display:none}
+  .linha{grid-template-columns:1fr}
+  .folha{position:fixed;z-index:10}
+  .scrim{position:fixed;z-index:9}
+}
+@media (max-width:440px){.kpis{grid-template-columns:1fr}.kpi .v{font-size:26px}}
+</style>
+
+<div class="nota">
+  <span class="chip">Pré-visualização</span>
+  <span><b>Dados fictícios.</b> Toque em <b>+ Lançar</b> para ver o formulário de multa coparticipada e de manutenção. O tema claro/escuro segue o seu sistema.</span>
+</div>
+
+<div class="win" id="win">
+  <aside class="side" aria-label="Navegação">
+    <div class="marca">
+      <svg viewBox="0 0 516 418" aria-hidden="true"><g>
+        <path d="M 106 119 C 142 48 215 0 307 0 C 422 0 516 94 516 209 C 516 324 422 418 307 418 C 224 418 151 378 114 316 L 154 316 C 190 360 243 387 307 387 C 406 387 486 307 486 209 C 486 111 406 32 307 32 C 238 32 179 66 143 119 Z"/>
+        <path d="M 0 167 H 190 L 301 213 V 340 L 208 293 H 92 L 74 268 H 236 L 214 241 H 56 L 37 216 H 195 L 173 191 H 19 Z"/>
+        <path d="M 175 142.5 L 304.5 91 L 355 111.5 L 226.5 164 Z"/>
+        <path d="M 250 174 L 380 120 L 439 145 L 302 196 Z"/>
+        <path d="M 394 179 L 401 176.5 V 240.5 L 423.5 230 V 167 L 446 157 V 276.5 L 394 301 Z"/>
+      </g></svg>
+      <div><span>Frota</span><small>Gestão de frota</small></div>
+    </div>
+    <button class="nav" data-ecra="inicio" aria-current="page">
+      <svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Início<span class="n">5</span></button>
+    <button class="nav" data-ecra="carros">
+      <svg viewBox="0 0 24 24"><path d="M5 16l1.5-5.5A2 2 0 0 1 8.4 9h7.2a2 2 0 0 1 1.9 1.5L19 16"/><rect x="3" y="16" width="18" height="4" rx="1.5"/><circle cx="7" cy="20" r="1"/><circle cx="17" cy="20" r="1"/></svg>Carros</button>
+    <button class="nav" data-ecra="motoristas">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg>Motoristas</button>
+    <button class="nav" data-ecra="relatorios">
+      <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Relatórios</button>
+    <button class="nav" data-ecra="planos">
+      <svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg><span>Planos<span class="lbl-long"> de manutenção</span></span></button>
+    <button class="nav" data-ecra="backup">
+      <svg viewBox="0 0 24 24"><path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 19 10a4 4 0 0 1 0 8z"/><path d="M12 11v6M9.5 13.5L12 11l2.5 2.5"/></svg>Backup</button>
+    <div class="grow"></div>
+    <button class="lancar" id="btnLancar" aria-haspopup="dialog">+ Lançar <kbd>Ctrl N</kbd></button>
+    <div class="estado"><i></i>Guardado no Google Drive · 18:42</div>
+  </aside>
+
+  <main class="main">
+    <div class="topo">
+      <div><h1 id="titulo">Início</h1><div class="sub" id="subtitulo">Terça-feira, 20 de outubro de 2026</div></div>
+      <div class="busca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>Procurar matrícula <kbd>Ctrl K</kbd></div>
+    </div>
+
+    <div class="conteudo" id="ecra-inicio">
+      <section class="kpis" aria-label="Resumo">
+        <div class="kpi"><div class="l">Gasto este mês</div><div class="v">1 284,50<small>€</small></div><div class="d">outubro · 14 lançamentos</div></div>
+        <div class="kpi"><div class="l">Gasto no ano</div><div class="v">18 942,30<small>€</small></div><div class="d">2026 · média 1 894 € / mês</div></div>
+        <div class="kpi warn"><div class="l">Por pagar (hoje)</div><div class="v">612,00<small>€</small></div><div class="d">3 documentos · 1 multa</div></div>
+        <div class="kpi"><div class="l">Carros ativos</div><div class="v">23</div><div class="d">2 inativos · 1 vendido</div></div>
+      </section>
+
+      <div class="grid2">
+        <section class="painel" aria-label="Próximos vencimentos">
+          <h2>Próximos vencimentos <span class="ct">5</span></h2>
+          <div class="item"><i class="sev v"></i><span class="mat">45-RT-12</span><div class="txt"><b>Mudança de óleo</b><span>Plano: a cada 15 000 km ou 12 meses</span></div><span class="pill v">passou 320 km</span></div>
+          <div class="item"><i class="sev p"></i><span class="mat">78-PL-03</span><div class="txt"><b>Identificar condutor até 23 out</b><span>Multa notificada a 1 out · 15 dias úteis</span></div><span class="pill p">faltam 3 dias</span></div>
+          <div class="item"><i class="sev p"></i><span class="mat">12-AB-34</span><div class="txt"><b>IUC</b><span>Vence a 31 out · 148,00 €</span></div><span class="pill p">faltam 11 dias</span></div>
+          <div class="item"><i class="sev p"></i><span class="mat">33-XZ-90</span><div class="txt"><b>Travões</b><span>Plano: a cada 40 000 km</span></div><span class="pill p">faltam 640 km</span></div>
+          <div class="item"><i class="sev p"></i><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="12" r="2.5"/><path d="M14 10h4M14 14h3"/></svg></div><div class="txt"><b>Rui Costa · carta de condução</b><span>Caduca a 12 dez 2026</span></div><span class="pill p">faltam 53 dias</span></div>
+        </section>
+
+        <section class="painel" aria-label="Últimos lançamentos">
+          <h2>Últimos lançamentos</h2>
+          <div class="item"><div class="ico"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></div><div class="txt"><b>Mudança de óleo · feita por nós</b><span>27-HG-55 · 20 out · 152 340 km</span></div><span class="val">46,80 €</span></div>
+          <div class="item"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></div><div class="txt"><b>Pneus · troca FE + FD</b><span>45-RT-12 · 19 out · Pneus Silva</span></div><span class="val">212,00 €</span></div>
+          <div class="item"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.01"/></svg></div><div class="txt"><b>Multa · velocidade · coparticipada</b><span>78-PL-03 · João Silva · empresa 40 € de 120 €</span></div><span class="val">40,00 €</span></div>
+          <div class="item"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg></div><div class="txt"><b>Atualizar KM</b><span>12-AB-34 · 17 out · 98 120 km</span></div><span class="val muted">—</span></div>
+          <div class="item"><div class="ico"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></svg></div><div class="txt"><b>Seguro anual · pago</b><span>33-XZ-90 · 15 out · próximo criado para 2027</span></div><span class="val">389,00 €</span></div>
+          <div class="item"><div class="ico"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></div><div class="txt"><b>Embraiagem · Oficina Auto Lima</b><span>61-QQ-08 · 14 out · peças 310 € + mão de obra 180 €</span></div><span class="val">490,00 €</span></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="conteudo" id="ecra-carros" hidden>
+      <section class="painel">
+        <div class="tabela-wrap">
+          <table>
+            <thead><tr><th>Matrícula</th><th>Marca e modelo</th><th class="num">KM atual</th><th>Motorista</th><th class="num">Gasto em 2026</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mat">12-AB-34</span></td><td>Renault Kangoo</td><td class="num">98 120 km</td><td>Ana Ferreira</td><td class="num">1 412,40 €</td></tr>
+              <tr><td><span class="mat">27-HG-55</span></td><td>Citroën Berlingo</td><td class="num">152 340 km</td><td>Pedro Lopes</td><td class="num">2 086,90 €</td></tr>
+              <tr><td><span class="mat">33-XZ-90</span></td><td>Peugeot Partner</td><td class="num">119 360 km</td><td>Rui Costa</td><td class="num">1 237,00 €</td></tr>
+              <tr><td><span class="mat">45-RT-12</span></td><td>Fiat Doblò</td><td class="num">165 320 km</td><td>Marta Sousa</td><td class="num">2 954,15 €</td></tr>
+              <tr><td><span class="mat">61-QQ-08</span></td><td>Opel Combo</td><td class="num">134 900 km</td><td>Tiago Neves</td><td class="num">1 803,60 €</td></tr>
+              <tr><td><span class="mat">78-PL-03</span></td><td>Renault Kangoo</td><td class="num">87 455 km</td><td>João Silva</td><td class="num">968,20 €</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="conteudo" id="ecra-outro" hidden>
+      <section class="painel"><div class="vazio"><b id="outroTitulo">Relatórios</b>Este ecrã está no plano (Tarefas 10–13) e ainda não faz parte da pré-visualização.</div></section>
+    </div>
+  </main>
+
+  <div class="scrim" id="scrim"></div>
+  <section class="folha" id="folha" role="dialog" aria-modal="true" aria-labelledby="folhaTitulo">
+    <header><h3 id="folhaTitulo">Lançar</h3><button class="x" id="fechar" aria-label="Fechar">×</button></header>
+    <div class="corpo">
+      <div class="seg" id="tipos" role="group" aria-label="Tipo de lançamento">
+        <button type="button" data-tipo="manutencao" aria-pressed="false">Manutenção</button>
+        <button type="button" data-tipo="pneus" aria-pressed="false">Pneus</button>
+        <button type="button" data-tipo="documento" aria-pressed="false">Documento</button>
+        <button type="button" data-tipo="multa" aria-pressed="true">Multa</button>
+        <button type="button" data-tipo="km" aria-pressed="false">KM</button>
+      </div>
+
+      <!-- MULTA -->
+      <div id="f-multa" style="display:flex;flex-direction:column;gap:14px">
+        <div class="linha">
+          <div class="campo"><label for="m-carro">Carro</label><select id="m-carro"><option>78-PL-03 · Renault Kangoo</option><option>12-AB-34 · Renault Kangoo</option></select></div>
+          <div class="campo"><label for="m-data">Data da infração</label><input id="m-data" type="date" value="2026-10-14"></div>
+        </div>
+        <div class="campo"><label for="m-cond">Condutor</label><select id="m-cond"><option>João Silva</option><option>Ana Ferreira</option><option>Por identificar</option></select>
+          <span class="ajuda ok">✓ Atribuído a este carro nesta data</span></div>
+        <div class="linha">
+          <div class="campo"><label for="m-inf">Infração</label><select id="m-inf"><option>Velocidade</option><option>Estacionamento</option><option>Telemóvel</option><option>Semáforo</option><option>Cinto</option></select></div>
+          <div class="campo"><label for="m-pts">Pontos retirados</label><input id="m-pts" type="number" min="0" max="12" value="2"></div>
+        </div>
+        <div class="linha">
+          <div class="campo"><label for="m-not">Data da notificação</label><input id="m-not" type="date" value="2026-10-01"><span class="ajuda alerta">Identificar condutor até 23 out</span></div>
+          <div class="campo"><label for="m-prazo">Prazo de pagamento</label><input id="m-prazo" type="date" value="2026-10-30"></div>
+        </div>
+        <div class="campo" id="c-valor"><label for="m-valor">Valor da multa (€)</label><input id="m-valor" inputmode="decimal" value="120,00"><span class="msg-erro" id="e-valor" hidden></span></div>
+
+        <div class="campo"><label>Quem paga</label>
+          <div class="seg" id="quem" role="group" aria-label="Quem paga">
+            <button type="button" data-q="empresa" aria-pressed="false">Empresa</button>
+            <button type="button" data-q="colaborador" aria-pressed="false">Colaborador</button>
+            <button type="button" data-q="copart" aria-pressed="true">Coparticipado</button>
+          </div></div>
+        <div class="campo" id="c-emp"><label for="m-emp">Parte da empresa (€)</label><input id="m-emp" inputmode="decimal" value="40,00"><span class="msg-erro" id="e-emp" hidden></span></div>
+        <div class="reparte" aria-live="polite">
+          <div class="barra"><i id="barEmp" style="width:33%"></i></div>
+          <div class="t"><span>Empresa <b id="tEmp">40,00 € (33%)</b></span><span>Colaborador <b id="tCol">80,00 €</b></span></div>
+        </div>
+        <label class="interruptor" id="adiantou"><input type="checkbox" id="m-adi" checked><span>A empresa adiantou o pagamento<small>Os 80,00 € do colaborador ficam "por reembolsar".</small></span></label>
+      </div>
+
+      <!-- MANUTENÇÃO -->
+      <div id="f-manut" style="display:none;flex-direction:column;gap:14px">
+        <div class="linha">
+          <div class="campo"><label for="t-carro">Carro</label><select id="t-carro"><option>61-QQ-08 · Opel Combo</option></select></div>
+          <div class="campo"><label for="t-data">Data</label><input id="t-data" type="date" value="2026-10-20"></div>
+        </div>
+        <div class="linha">
+          <div class="campo"><label for="t-tipo">Tipo</label><select id="t-tipo"><option>Mudança de óleo</option><option>Travões</option><option>Embraiagem</option><option>Revisão geral</option></select></div>
+          <div class="campo"><label for="t-km">KM</label><input id="t-km" inputmode="numeric" value="134 900"><span class="ajuda">Último registado: 134 900 km</span></div>
+        </div>
+        <div class="campo"><label>Feita por</label>
+          <div class="seg" id="feita" role="group" aria-label="Feita por">
+            <button type="button" data-f="nos" aria-pressed="true">Nós</button>
+            <button type="button" data-f="oficina" aria-pressed="false">Oficina</button>
+          </div></div>
+        <div id="m-nos" class="campo"><label for="t-pecas1">Peças e materiais (€)</label><input id="t-pecas1" inputmode="decimal" value="46,80"><span class="ajuda">Mão de obra própria: 0 €</span></div>
+        <div id="m-of" style="display:none;flex-direction:column;gap:14px">
+          <div class="campo"><label for="t-of">Oficina</label><input id="t-of" list="oficinas" value="Oficina Auto Lima"><datalist id="oficinas"><option value="Oficina Auto Lima"><option value="Pneus Silva"><option value="Garagem Central"></datalist></div>
+          <div class="linha">
+            <div class="campo"><label for="t-pecas">Peças (€)</label><input id="t-pecas" inputmode="decimal" value="310,00"></div>
+            <div class="campo"><label for="t-mao">Mão de obra (€)</label><input id="t-mao" inputmode="decimal" value="180,00"></div>
+          </div>
+          <div class="reparte"><div class="t"><span>Total</span><b id="tTot">490,00 €</b></div></div>
+        </div>
+      </div>
+
+      <div id="f-outro" class="aviso-sec" style="display:none">Nesta pré-visualização só os formulários de <b>Multa</b> e <b>Manutenção</b> estão preenchidos.</div>
+    </div>
+    <footer><button class="btn sec" id="cancelar">Cancelar</button><button class="btn pri" id="gravar">Lançar</button></footer>
+  </section>
+  <div class="toast" id="toast" role="status">Lançado ✓</div>
+</div>
+
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const fmt=c=>{const n=Math.abs(c),e=Math.floor(n/100),ct=String(n%100).padStart(2,'0');return (c<0?'-':'')+String(e).replace(/\B(?=(\d{3})+(?!\d))/g,' ')+','+ct+' €'};
+  // parseEuros: "1.234,56" "45,5" "45" "45.5" "45 €" -> cents; null if invalid
+  function parseEuros(t){t=String(t).replace(/€/g,'').replace(/\s/g,'').trim();if(!t||t.startsWith('-'))return null;
+    let m;if(/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(t))t=t.replace(/\./g,'');
+    if((m=t.match(/^(\d+)(?:[.,](\d{1,2}))?$/)))return parseInt(m[1],10)*100+(m[2]?parseInt(m[2].padEnd(2,'0'),10):0);return null}
+
+  // navegação
+  const titulos={inicio:'Início',carros:'Carros',motoristas:'Motoristas',relatorios:'Relatórios',planos:'Planos de manutenção',backup:'Backup'};
+  document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>{
+    document.querySelectorAll('.nav').forEach(x=>x.removeAttribute('aria-current'));b.setAttribute('aria-current','page');
+    const e=b.dataset.ecra;$('#titulo').textContent=titulos[e];
+    $('#subtitulo').textContent=e==='carros'?'23 ativos · mostrar inativos e vendidos':'Terça-feira, 20 de outubro de 2026';
+    $('#ecra-inicio').hidden=e!=='inicio';$('#ecra-carros').hidden=e!=='carros';$('#ecra-outro').hidden=(e==='inicio'||e==='carros');
+    $('#outroTitulo').textContent=titulos[e];
+  }));
+
+  // folha Lançar — nasce do botão "+"
+  const folha=$('#folha'),scrim=$('#scrim'),btn=$('#btnLancar'),win=$('#win');
+  function abrir(){const r=btn.getBoundingClientRect(),f=folha.getBoundingClientRect();
+    folha.style.setProperty('--ox',(r.left+r.width/2-f.left)+'px');folha.style.setProperty('--oy',(r.top+r.height/2-f.top)+'px');
+    folha.classList.add('on');scrim.classList.add('on');setTimeout(()=>$('#m-valor').focus({preventScroll:true}),60)}
+  function fechar(){folha.classList.remove('on');scrim.classList.remove('on');btn.focus({preventScroll:true})}
+  btn.addEventListener('click',abrir);$('#fechar').addEventListener('click',fechar);$('#cancelar').addEventListener('click',fechar);scrim.addEventListener('click',fechar);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&folha.classList.contains('on'))fechar();
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'){e.preventDefault();abrir()}});
+
+  function segmentado(grupo,cb){grupo.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    grupo.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed','false'));b.setAttribute('aria-pressed','true');cb(b)}))}
+  segmentado($('#tipos'),b=>{const t=b.dataset.tipo;
+    $('#f-multa').style.display=t==='multa'?'flex':'none';$('#f-manut').style.display=t==='manutencao'?'flex':'none';
+    $('#f-outro').style.display=(t!=='multa'&&t!=='manutencao')?'block':'none'});
+
+  // multa: repartição ao vivo
+  let quem='copart';
+  segmentado($('#quem'),b=>{quem=b.dataset.q;$('#c-emp').style.display=quem==='copart'?'flex':'none';atualizar()});
+  function erro(campo,msgEl,txt){campo.classList.toggle('erro',!!txt);msgEl.hidden=!txt;msgEl.textContent=txt||''}
+  function atualizar(){
+    const v=parseEuros($('#m-valor').value);erro($('#c-valor'),$('#e-valor'),v===null?'Escreva um valor em euros, por exemplo 120,00.':'');
+    let emp=quem==='empresa'?v:quem==='colaborador'?0:parseEuros($('#m-emp').value);let msg='';
+    if(quem==='copart'&&v!==null){if(emp===null)msg='Escreva a parte da empresa em euros.';else if(emp<=0||emp>=v)msg='A parte da empresa tem de ser maior que 0 e menor que o valor da multa.'}
+    erro($('#c-emp'),$('#e-emp'),msg);
+    if(v===null||emp===null||msg){$('#tEmp').textContent='—';$('#tCol').textContent='—';$('#barEmp').style.width='0';return}
+    const col=v-emp,pct=v?Math.round(emp*100/v):0;
+    $('#tEmp').textContent=fmt(emp)+' ('+pct+'%)';$('#tCol').textContent=fmt(col);$('#barEmp').style.width=pct+'%';
+    $('#adiantou').style.display=col>0?'flex':'none';$('#adiantou small').textContent='Os '+fmt(col)+' do colaborador ficam "por reembolsar".';
+  }
+  ['#m-valor','#m-emp'].forEach(s=>$(s).addEventListener('input',atualizar));atualizar();
+
+  // manutenção: nós / oficina
+  segmentado($('#feita'),b=>{const of=b.dataset.f==='oficina';$('#m-nos').style.display=of?'none':'flex';$('#m-of').style.display=of?'flex':'none'});
+  function total(){const p=parseEuros($('#t-pecas').value),m=parseEuros($('#t-mao').value);$('#tTot').textContent=(p===null||m===null)?'—':fmt(p+m)}
+  ['#t-pecas','#t-mao'].forEach(s=>$(s).addEventListener('input',total));
+
+  $('#gravar').addEventListener('click',()=>{if(document.querySelector('.campo.erro'))return;fechar();const t=$('#toast');t.classList.add('on');setTimeout(()=>t.classList.remove('on'),1800)});
+})();
+</script>
