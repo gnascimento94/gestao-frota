@@ -62,6 +62,38 @@ export function formatarData(iso: string): string {
   return `${Number(m[3])} ${mes} ${m[1]}`
 }
 
+/** `"2026-05-31"` → `"31 mai"`; o ano só aparece quando difere de `anoAtual`. */
+export function formatarDiaMes(iso: string, anoAtual: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  const mes = m && MESES[Number(m[2]) - 1]
+  if (!m || !mes) return iso
+  const base = `${Number(m[3])} ${mes}`
+  return Number(m[1]) === anoAtual ? base : `${base} ${m[1]}`
+}
+
+const MESES_LONGOS = [
+  'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+]
+
+/** Nome do mês (1–12) por extenso: `3` → `"março"`. */
+export function nomeMes(mes: number): string {
+  return MESES_LONGOS[mes - 1] ?? ''
+}
+
+/** `"2026-03"` → `"março 2026"`; `curto` → `"mar"`. */
+export function formatarMes(chave: string, curto = false): string {
+  const m = /^(\d{4})-(\d{2})/.exec(chave)
+  if (!m) return chave
+  const n = Number(m[2])
+  return curto ? (MESES[n - 1] ?? chave) : `${nomeMes(n)} ${m[1]}`
+}
+
+/** Cêntimos como euros sem casas decimais quando são redondos: `150000` → `"1 500 €"`. */
+export function formatarEurosCurto(c: number): string {
+  return c % 100 === 0 ? `${c < 0 ? '-' : ''}${agrupar(Math.abs(c) / 100)} €` : formatarEuros(c)
+}
+
 /** `"2026-10-20T18:42:07"` → `"18:42"`; `null` se não houver hora. */
 export function formatarHora(iso: string): string | null {
   const m = /^\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})/.exec(iso)

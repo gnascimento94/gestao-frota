@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { condutorSugerido, guardarMulta, motoristasListar } from '../api/comandos'
 import type { Infracao, Motorista, MultaInput, ResponsavelMulta } from '../api/tipos'
-import { hoje, paraErroApi } from '../ecras/comum'
+import { ROTULO_INFRACAO, hoje, paraErroApi } from '../ecras/comum'
 import { Campo, CampoSelecao } from '../ui/Campo'
 import { formatarEuros, parseEuros } from '../util/formato'
 import {
@@ -19,16 +19,7 @@ import {
 } from './logica'
 import { ErroGeral, Interruptor, Rodape, Segmentado } from './partes'
 
-const INFRACOES: [Infracao, string][] = [
-  ['velocidade', 'Velocidade'],
-  ['estacionamento', 'Estacionamento'],
-  ['telemovel', 'Telemóvel'],
-  ['semaforo', 'Semáforo'],
-  ['cinto', 'Cinto'],
-  ['documentos', 'Documentos'],
-  ['portagem', 'Portagem'],
-  ['outra', 'Outra'],
-]
+const INFRACOES = Object.entries(ROTULO_INFRACAO) as [Infracao, string][]
 
 const QUEM_PAGA = [
   ['empresa', 'Empresa'],

@@ -2,6 +2,7 @@ use super::config::obter_limiares;
 use super::historico::{HistoricoItem, historico};
 use super::lancamentos::nome_documento;
 use super::motoristas::{atribuicoes_regras, nomes_motoristas};
+use super::multas::ESTADO_MULTA_SQL;
 use super::{col_data, col_data_opt, data, erro};
 use crate::erro::Res;
 use crate::regras::alertas::{
@@ -325,22 +326,13 @@ fn rel_multas(
     ids: Option<&[i64]>,
     motorista: Option<i64>,
 ) -> Res<RelMultas> {
-    let mut st = conn.prepare(
+    // "Por reembolsar" segue a regra única do estado da multa (a mesma da ficha do motorista).
+    let mut st = conn.prepare(&format!(
         "SELECT carro_id, motorista_id, data_infracao, infracao, pontos, valor, valor_empresa,
-                empresa_adiantou, reembolsado_em IS NOT NULL
-         FROM multas",
-    )?;
-    type Linha = (
-        i64,
-        Option<i64>,
-        NaiveDate,
-        String,
-        i64,
-        i64,
-        i64,
-        bool,
-        bool,
-    );
+                ({ESTADO_MULTA_SQL}) = 'porReembolsar'
+         FROM multas"
+    ))?;
+    type Linha = (i64, Option<i64>, NaiveDate, String, i64, i64, i64, bool);
     let linhas = st
         .query_map([], |r| {
             Ok((
@@ -352,14 +344,13 @@ fn rel_multas(
                 r.get(5)?,
                 r.get(6)?,
                 r.get(7)?,
-                r.get(8)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<Linha>>>()?;
     let mut rel = RelMultas::default();
     let mut por_infracao: BTreeMap<String, (i64, i64)> = BTreeMap::new();
     let mut por_mot: BTreeMap<Option<i64>, (i64, i64)> = BTreeMap::new();
-    for (carro, mot, dia, infracao, pontos, valor, empresa, adiantou, reembolsado) in linhas {
+    for (carro, mot, dia, infracao, pontos, valor, empresa, por_reembolsar) in linhas {
         if dia < p.de || dia > p.ate || !quer(ids, carro) {
             continue;
         }
@@ -371,7 +362,7 @@ fn rel_multas(
         rel.total += valor;
         rel.empresa += empresa;
         rel.colaboradores += colaborador;
-        if adiantou && !reembolsado {
+        if por_reembolsar {
             rel.por_reembolsar += colaborador;
         }
         let e = por_infracao.entry(infracao).or_insert((0, 0));

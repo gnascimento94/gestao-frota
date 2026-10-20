@@ -8,13 +8,15 @@ import { Lancar } from './lancar/Lancar'
 import { InicioOuBoasVindas } from './ecras/BoasVindas'
 import { Carros } from './ecras/Carros'
 import { FichaCarro } from './ecras/FichaCarro'
+import { Inicio } from './ecras/Inicio'
 import { Motoristas } from './ecras/Motoristas'
+import { Relatorios } from './ecras/Relatorios'
 
 export type Ecra =
   | { nome: 'inicio' }
   | { nome: 'carros' }
   | { nome: 'carro'; id: number }
-  | { nome: 'motoristas' }
+  | { nome: 'motoristas'; /** Motorista a abrir (p.ex. a partir de um alerta). */ id?: number }
   | { nome: 'relatorios' }
   | { nome: 'planos' }
   | { nome: 'backup' }
@@ -153,15 +155,16 @@ function Concha() {
               onLancar={abrirLancar}
             />
           )}
-          {ecra.nome === 'motoristas' && <Motoristas ano={ano} versao={versao} />}
+          {ecra.nome === 'motoristas' && (
+            <Motoristas key={ecra.id ?? 'lista'} ano={ano} versao={versao} inicial={ecra.id} />
+          )}
           {ecra.nome === 'inicio' && (
             <InicioOuBoasVindas ano={ano} versao={versao} onNavegar={navegar}>
-              <EcraVazio titulo={titulo} />
+              <Inicio ano={ano} versao={versao} onNavegar={navegar} />
             </InicioOuBoasVindas>
           )}
-          {(ecra.nome === 'relatorios' || ecra.nome === 'planos' || ecra.nome === 'backup') && (
-            <EcraVazio titulo={titulo} />
-          )}
+          {ecra.nome === 'relatorios' && <Relatorios versao={versao} onNavegar={navegar} />}
+          {(ecra.nome === 'planos' || ecra.nome === 'backup') && <EcraVazio titulo={titulo} />}
         </div>
       </main>
 

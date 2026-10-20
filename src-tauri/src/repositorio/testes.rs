@@ -1199,3 +1199,45 @@ fn erro_sem_campo_nao_serializa_campo() {
     let e = e.com_campo("pagoEm");
     assert!(serde_json::to_string(&e).unwrap().contains(r#""campo":"pagoEm""#));
 }
+
+#[test]
+fn relatorio_por_reembolsar_usa_a_mesma_regra_da_ficha() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let ana = motorista(&c, "Ana");
+    // adiantou e pagou: por reembolsar (8 000)
+    let mut m = multa(a, Some(ana), "2026-09-01", 12_000, "coparticipado");
+    m.valor_empresa = Some(4_000);
+    m.empresa_adiantou = true;
+    m.pago_em = Some("2026-09-10".into());
+    guardar_multa(&mut c, &m, hoje()).unwrap();
+    // adiantamento marcado mas ainda por pagar: ainda não há nada a reembolsar
+    let mut m = multa(a, Some(ana), "2026-09-02", 5_000, "colaborador");
+    m.empresa_adiantou = true;
+    guardar_multa(&mut c, &m, hoje()).unwrap();
+    // paga com adiantamento mas sem condutor identificado: por identificar, não por reembolsar
+    let mut m = multa(a, None, "2026-09-03", 3_000, "colaborador");
+    m.empresa_adiantou = true;
+    m.pago_em = Some("2026-09-10".into());
+    guardar_multa(&mut c, &m, hoje()).unwrap();
+
+    let filtro = |motorista_id| FiltroRelatorio {
+        de: "2026-01-01".into(),
+        ate: "2026-12-31".into(),
+        carro_ids: None,
+        motorista_id,
+    };
+    let soma = |l: Vec<MultaItem>| -> i64 {
+        l.iter()
+            .filter(|x| x.estado_multa == EstadoMulta::PorReembolsar)
+            .map(|x| x.valor_colaborador)
+            .sum()
+    };
+    let ficha = multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar;
+    assert_eq!(ficha, 8_000);
+    assert_eq!(relatorio(&c, &filtro(Some(ana))).unwrap().multas.por_reembolsar, ficha);
+    assert_eq!(soma(multas_listar(&c, None, Some(ana)).unwrap()), ficha);
+    let todas = soma(multas_listar(&c, None, None).unwrap());
+    assert_eq!(relatorio(&c, &filtro(None)).unwrap().multas.por_reembolsar, todas);
+    assert_eq!(todas, 8_000);
+}

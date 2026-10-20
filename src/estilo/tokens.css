@@ -14,6 +14,16 @@
   --laranja-suave: rgb(255 149 0 / 0.14);
   --verde: #34c759;
 
+  /* Categorias de gasto (gráficos). Validadas para daltonismo nos pares adjacentes;
+     sem vermelho/laranja, reservados para alertas. "Outros" é cinzento de propósito. */
+  --cat-manutencao: #2a78d6;
+  --cat-pneus: #1baf7a;
+  --cat-iuc: #eda100;
+  --cat-inspecao: #6250d6;
+  --cat-seguro: #e87ba4;
+  --cat-multa: #008300;
+  --cat-outro: #8a8f99;
+
   --texto: #1c1f24;
   --texto-2: #5d6470;
   --texto-3: #8a909b;
@@ -80,6 +90,14 @@
     --laranja: #ff9f0a;
     --laranja-suave: rgb(255 159 10 / 0.16);
     --verde: #30d158;
+
+    --cat-manutencao: #3987e5;
+    --cat-pneus: #199e70;
+    --cat-iuc: #c98500;
+    --cat-inspecao: #9085e9;
+    --cat-seguro: #d55181;
+    --cat-multa: #008300;
+    --cat-outro: #8a8f99;
 
     --texto: #f1f2f4;
     --texto-2: #a8adb7;

@@ -3,7 +3,7 @@
 // aqui não se reimplementa nenhuma regra.
 
 import { useCallback, useEffect, useState } from 'react'
-import type { ErroApi, EstadoCarro, EstadoMulta } from '../api/tipos'
+import type { Categoria, ErroApi, EstadoCarro, EstadoMulta, Infracao } from '../api/tipos'
 
 const dois = (n: number) => String(n).padStart(2, '0')
 
@@ -110,6 +110,31 @@ export const ROTULO_CATEGORIA: Record<string, string> = {
   seguro: 'Seguro',
   multa: 'Multas',
   outro: 'Outros',
+}
+
+/** Ordem fixa das categorias (listas, empilhamento do gráfico e legenda). */
+export const ORDEM_CATEGORIAS: Categoria[] = ['manutencao', 'pneus', 'iuc', 'inspecao', 'seguro', 'multa', 'outro']
+
+/** Cor de cada categoria: tokens de tokens.css (com variante para o tema escuro). */
+export const CORES_CATEGORIA: Record<Categoria, string> = {
+  manutencao: 'var(--cat-manutencao)',
+  pneus: 'var(--cat-pneus)',
+  iuc: 'var(--cat-iuc)',
+  inspecao: 'var(--cat-inspecao)',
+  seguro: 'var(--cat-seguro)',
+  multa: 'var(--cat-multa)',
+  outro: 'var(--cat-outro)',
+}
+
+export const ROTULO_INFRACAO: Record<Infracao, string> = {
+  velocidade: 'Velocidade',
+  estacionamento: 'Estacionamento',
+  telemovel: 'Telemóvel',
+  semaforo: 'Semáforo',
+  cinto: 'Cinto',
+  documentos: 'Documentos',
+  portagem: 'Portagem',
+  outra: 'Outra',
 }
 
 export const ROTULO_ESTADO: Record<EstadoCarro, string> = {

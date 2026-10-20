@@ -94,9 +94,18 @@ function FormMotorista({
 }
 
 /** `versao` muda após cada lançamento (folha Lançar): os dados voltam a ser pedidos. */
-export function Motoristas({ ano, versao = 0 }: { ano: number; versao?: number }) {
+export function Motoristas({
+  ano,
+  versao = 0,
+  inicial,
+}: {
+  ano: number
+  versao?: number
+  /** Motorista aberto à entrada (p.ex. vindo de um alerta da carta no Início). */
+  inicial?: number
+}) {
   const [mostrarTodos, setMostrarTodos] = useState(false)
-  const [selecionado, setSelecionado] = useState<number | null>(null)
+  const [selecionado, setSelecionado] = useState<number | null>(inicial ?? null)
   const [folha, setFolha] = useState<{ aberta: boolean; origem: DOMRect | null; editar: boolean }>({
     aberta: false,
     origem: null,
