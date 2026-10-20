@@ -299,9 +299,22 @@ export interface Alerta {
   faltaKm: number | null
   /** Negativo quando vencido. */
   faltaDias: number | null
+  /** Manutenção: dimensão que decide o nível (só essa `falta*` vem preenchida). */
+  motivo: Motivo | null
+  /** "AAAA-MM-DD": vencimento, prazo de identificação, validade da carta ou próxima data. */
+  data: string | null
+  /** Alertas de carro. */
+  matricula: string | null
+  /** Alerta da carta. */
+  nome: string | null
 }
 
+export type Motivo = 'km' | 'dias'
+
 export interface Painel {
+  /** Ano e mês (1–12) usados pelo núcleo para "este mês" e "no ano". */
+  ano: number
+  mes: number
   gastoMes: number
   gastoAno: number
   porPagar: number
@@ -326,6 +339,8 @@ export interface Resumo {
   porCategoria: PorCategoria
   /** Chave "AAAA-MM". */
   porMes: Record<string, PorCategoria>
+  /** Total de cada mês (chave "AAAA-MM"). */
+  totalPorMes: Record<string, number>
   /** [carroId, total]. */
   porCarro: [number, number][]
   porPagar: number

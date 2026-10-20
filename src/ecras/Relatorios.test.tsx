@@ -10,7 +10,7 @@ vi.mock('../api/comandos')
 const m = vi.mocked(api)
 
 const vazio: Relatorio = {
-  resumo: { total: 0, porCategoria: {}, porMes: {}, porCarro: [], porPagar: 0 },
+  resumo: { total: 0, porCategoria: {}, porMes: {}, totalPorMes: {}, porCarro: [], porPagar: 0 },
   porMotorista: [],
   porTipoManutencao: [],
   manutencao: { interna: 0, oficina: 0, pecas: 0, maoObra: 0, naoDiscriminado: 0, porOficina: [] },
@@ -86,6 +86,7 @@ describe('Relatórios — conteúdo vindo do núcleo', () => {
         total: 123456,
         porCategoria: { manutencao: 100000, pneus: 23456 },
         porMes: { '2026-10': { manutencao: 100000, pneus: 23456 } },
+        totalPorMes: { '2026-10': 123456 },
         porCarro: [[1, 123456]],
         porPagar: 5000,
       },
@@ -102,6 +103,51 @@ describe('Relatórios — conteúdo vindo do núcleo', () => {
     expect(within(infracoes).getByText('30,00 €')).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: /AA-12-BB/ }))
     expect(onNavegar).toHaveBeenCalledWith({ nome: 'carro', id: 1 })
+  })
+
+  test('com erro ou com um pedido novo pendente, os valores anteriores desaparecem', async () => {
+    const user = userEvent.setup()
+    m.relatorio.mockResolvedValueOnce({ ...vazio, resumo: { ...vazio.resumo, total: 4200 } })
+    render(<Relatorios onNavegar={() => {}} />)
+    expect((await screen.findByLabelText('Total no período')).textContent).toBe('42,00 €')
+    // pedido novo que ainda não respondeu
+    let responder: (r: Relatorio) => void = () => {}
+    m.relatorio.mockReturnValueOnce(new Promise((ok) => (responder = ok)))
+    await user.click(screen.getByRole('button', { name: 'Este ano' }))
+    expect(await screen.findByRole('status')).toBeTruthy()
+    expect(screen.queryByLabelText('Total no período')).toBeNull()
+    responder({ ...vazio, resumo: { ...vazio.resumo, total: 9900 } })
+    expect((await screen.findByLabelText('Total no período')).textContent).toBe('99,00 €')
+    // erro: mostra a mensagem e não os números antigos
+    m.relatorio.mockRejectedValueOnce({ codigo: 'io', mensagem: 'Não foi possível ler o relatório.' })
+    await user.click(screen.getByRole('button', { name: 'Ano anterior' }))
+    expect(await screen.findByText('Não foi possível ler o relatório.')).toBeTruthy()
+    expect(screen.queryByLabelText('Total no período')).toBeNull()
+  })
+
+  test('filtro de carros fecha com Esc e com clique fora', async () => {
+    m.carrosListar.mockResolvedValue([
+      {
+        id: 1, matricula: 'AA-12-BB', marca: null, modelo: null, ano: null, cor: null, kmInicial: 0,
+        kmAtual: 0, dataAquisicao: null, estado: 'ativo', dataSaida: null, notas: null,
+        motoristaAtual: null, gastoAno: 0, gastoTotal: 0,
+      },
+    ])
+    const user = userEvent.setup()
+    render(<Relatorios onNavegar={() => {}} />)
+    const botao = await screen.findByRole('button', { name: /Carros/ })
+    expect(botao.getAttribute('aria-expanded')).toBe('false')
+    await user.click(botao)
+    const caixa = await screen.findByRole('checkbox', { name: 'AA-12-BB' })
+    await user.click(caixa)
+    await waitFor(() => expect(m.relatorio).toHaveBeenLastCalledWith(expect.objectContaining({ carroIds: [1] })))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('checkbox', { name: 'AA-12-BB' })).toBeNull()
+    expect(document.activeElement).toBe(botao)
+    await user.click(botao)
+    expect(screen.getByRole('checkbox', { name: 'AA-12-BB' })).toBeTruthy()
+    await user.click(document.body)
+    expect(screen.queryByRole('checkbox', { name: 'AA-12-BB' })).toBeNull()
   })
 
   test('filtro por motorista vai no pedido', async () => {

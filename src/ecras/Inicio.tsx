@@ -1,14 +1,15 @@
 import { useCallback, type ReactNode } from 'react'
-import { carrosListar, limiaresObter, motoristasListar, painel } from '../api/comandos'
+import { carrosListar, painel } from '../api/comandos'
 import type { Alerta, HistoricoItem } from '../api/tipos'
 import type { Ecra } from '../App'
 import { Cartao } from '../ui/Cartao'
 import { ItemLista, Lista, Pilula, Valor } from '../ui/Lista'
 import { formatarData, formatarEuros, formatarKm, nomeMes } from '../util/formato'
-import { textoAlerta, type ContextoAlerta } from './alertas'
-import { hoje, useCarregar } from './comum'
+import { textoAlerta } from './alertas'
+import { useCarregar } from './comum'
 
 interface InicioProps {
+  /** Ano pedido à lista de carros (só para contar inativos e vendidos). */
   ano: number
   /** Muda após cada lançamento (folha Lançar): os dados voltam a ser pedidos. */
   versao?: number
@@ -17,10 +18,9 @@ interface InicioProps {
 
 /** Valor em euros com o símbolo mais pequeno, como na maquete. */
 function Euros({ centimos }: { centimos: number }) {
-  const texto = formatarEuros(centimos)
   return (
     <>
-      {texto.replace(/ €$/, '')}
+      {formatarEuros(centimos).replace(/ €$/, '')}
       <small> €</small>
     </>
   )
@@ -59,15 +59,14 @@ function detalheRecente(i: HistoricoItem): string {
     .join(' · ')
 }
 
+function plural(n: number, um: string, varios: string): string | null {
+  return n > 0 ? `${n} ${n === 1 ? um : varios}` : null
+}
+
 export function Inicio({ ano, versao = 0, onNavegar }: InicioProps) {
   const buscar = useCallback(async () => {
-    const [p, carros, motoristas, limiares] = await Promise.all([
-      painel(),
-      carrosListar(false, ano),
-      motoristasListar(false),
-      limiaresObter(),
-    ])
-    return { p, carros, motoristas, limiares }
+    const [p, carros] = await Promise.all([painel(), carrosListar(false, ano)])
+    return { p, carros }
   }, [ano])
   const { dados, erro } = useCarregar(buscar, versao)
 
@@ -79,17 +78,13 @@ export function Inicio({ ano, versao = 0, onNavegar }: InicioProps) {
     )
   }
   if (!dados) return null
-  const { p, carros, motoristas, limiares } = dados
-
-  const ctx: ContextoAlerta = {
-    hoje: hoje(),
-    matricula: (id) => carros.find((c) => c.id === id)?.matricula ?? `Carro ${id}`,
-    motorista: (id) => motoristas.find((m) => m.id === id),
-    limiares,
-  }
-  const inativos = carros.filter((c) => c.estado === 'inativo').length
-  const vendidos = carros.filter((c) => c.estado === 'vendido').length
-  const mes = Number(ctx.hoje.slice(5, 7))
+  const { p, carros } = dados
+  const outros = [
+    plural(carros.filter((c) => c.estado === 'inativo').length, 'inativo', 'inativos'),
+    plural(carros.filter((c) => c.estado === 'vendido').length, 'vendido', 'vendidos'),
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <>
@@ -99,24 +94,16 @@ export function Inicio({ ano, versao = 0, onNavegar }: InicioProps) {
         </p>
       )}
       <section className="kpis" aria-label="Resumo">
-        <Kpi rotulo="Gasto este mês" detalhe={nomeMes(mes)}>
+        <Kpi rotulo="Gasto este mês" detalhe={nomeMes(p.mes)}>
           <Euros centimos={p.gastoMes} />
         </Kpi>
-        <Kpi rotulo="Gasto no ano" detalhe={String(ano)}>
+        <Kpi rotulo="Gasto no ano" detalhe={String(p.ano)}>
           <Euros centimos={p.gastoAno} />
         </Kpi>
         <Kpi rotulo="Por pagar (hoje)" detalhe="documentos e multas em dívida" aviso={p.porPagar > 0}>
           <Euros centimos={p.porPagar} />
         </Kpi>
-        <Kpi
-          rotulo="Carros ativos"
-          detalhe={
-            [inativos && `${inativos} ${inativos === 1 ? 'inativo' : 'inativos'}`,
-              vendidos && `${vendidos} ${vendidos === 1 ? 'vendido' : 'vendidos'}`]
-              .filter(Boolean)
-              .join(' · ') || undefined
-          }
-        >
+        <Kpi rotulo="Carros ativos" detalhe={outros || undefined}>
           {p.carrosAtivos}
         </Kpi>
       </section>
@@ -133,7 +120,7 @@ export function Inicio({ ano, versao = 0, onNavegar }: InicioProps) {
                   <ItemLista
                     key={`${a.tipo}-${a.refId}-${a.carroId ?? a.motoristaId}`}
                     severidade={a.nivel}
-                    titulo={textoAlerta(a, ctx)}
+                    titulo={textoAlerta(a, p.ano)}
                     fim={<Pilula severidade={a.nivel}>{a.nivel === 'vencido' ? 'Vencido' : 'Próximo'}</Pilula>}
                     onClick={ir ? () => onNavegar(ir) : undefined}
                   />

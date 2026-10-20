@@ -34,6 +34,31 @@ pub struct Alerta {
     pub falta_km: Option<i64>,
     /// Dias de calendário; negativo quando vencido.
     pub falta_dias: Option<i64>,
+    /// Manutenção: dimensão que decide o nível (só essa `falta_*` vem preenchida).
+    pub motivo: Option<Motivo>,
+    /// Data relevante: vencimento (documento, multa), prazo para identificar o condutor,
+    /// validade da carta, ou próxima data da manutenção quando decide a data.
+    #[serde(serialize_with = "data_opcional")]
+    pub data: Option<NaiveDate>,
+    /// Matrícula do carro (alertas de carro); preenchida por quem lê da base de dados.
+    pub matricula: Option<String>,
+    /// Nome do motorista (alerta da carta).
+    pub nome: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Motivo {
+    Km,
+    Dias,
+}
+
+/// `Option<NaiveDate>` como "AAAA-MM-DD" (ou `null`).
+fn data_opcional<S: serde::Serializer>(d: &Option<NaiveDate>, s: S) -> Result<S::Ok, S::Error> {
+    match d {
+        Some(d) => s.serialize_str(&d.format("%Y-%m-%d").to_string()),
+        None => s.serialize_none(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,21 +157,28 @@ pub fn alertas_manutencao(
                 None => (carro.base_km, carro.base_data),
             };
             let falta_km = plano.cada_km.map(|k| base_km + k - carro.km_atual);
-            let falta_dias = plano
+            let proxima_data = plano
                 .cada_meses
-                .and_then(|m| base_data.checked_add_months(Months::new(m)))
-                .map(|p| dias(p, hoje));
+                .and_then(|m| base_data.checked_add_months(Months::new(m)));
+            let falta_dias = proxima_data.map(|p| dias(p, hoje));
 
-            let vencido = falta_km.is_some_and(|k| k <= 0) || falta_dias.is_some_and(|d| d <= 0);
-            let proximo =
-                falta_km.is_some_and(|k| k < lim.km) || falta_dias.is_some_and(|d| d < lim.dias);
-            let nivel = if vencido {
-                Nivel::Vencido
-            } else if proximo {
-                Nivel::Proximo
+            let km_vencido = falta_km.is_some_and(|k| k <= 0);
+            let dias_vencido = falta_dias.is_some_and(|d| d <= 0);
+            let km_proximo = falta_km.is_some_and(|k| k < lim.km);
+            let dias_proximo = falta_dias.is_some_and(|d| d < lim.dias);
+            // O km tem prioridade quando ambos decidem o mesmo nível.
+            let (nivel, motivo) = if km_vencido {
+                (Nivel::Vencido, Motivo::Km)
+            } else if dias_vencido {
+                (Nivel::Vencido, Motivo::Dias)
+            } else if km_proximo {
+                (Nivel::Proximo, Motivo::Km)
+            } else if dias_proximo {
+                (Nivel::Proximo, Motivo::Dias)
             } else {
                 continue;
             };
+            let por_km = motivo == Motivo::Km;
             out.push(Alerta {
                 nivel,
                 tipo: TipoAlerta::Manutencao,
@@ -154,8 +186,12 @@ pub fn alertas_manutencao(
                 motorista_id: None,
                 ref_id: plano.id,
                 titulo: plano.tipo_nome.clone(),
-                falta_km,
-                falta_dias,
+                falta_km: if por_km { falta_km } else { None },
+                falta_dias: if por_km { None } else { falta_dias },
+                motivo: Some(motivo),
+                data: if por_km { None } else { proxima_data },
+                matricula: None,
+                nome: None,
             });
         }
     }
@@ -186,6 +222,10 @@ pub fn alertas_documentos(docs: &[DocAlerta], hoje: NaiveDate) -> Vec<Alerta> {
                 titulo: doc.tipo_nome.clone(),
                 falta_km: None,
                 falta_dias: Some(falta),
+                motivo: None,
+                data: Some(doc.vencimento),
+                matricula: None,
+                nome: None,
             })
         })
         .collect()
@@ -209,6 +249,10 @@ pub fn alertas_cartas(c: &[CartaAlerta], hoje: NaiveDate) -> Vec<Alerta> {
                 titulo: "Carta de condução".to_string(),
                 falta_km: None,
                 falta_dias: Some(falta),
+                motivo: None,
+                data: Some(carta.validade),
+                matricula: None,
+                nome: Some(carta.nome.clone()),
             })
         })
         .collect()
@@ -301,12 +345,6 @@ pub fn dias_uteis_entre(a: NaiveDate, b: NaiveDate) -> i64 {
     n
 }
 
-fn mes_pt(m: u32) -> &'static str {
-    [
-        "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez",
-    ][(m as usize - 1) % 12]
-}
-
 pub fn alertas_multas(m: &[MultaAlerta], hoje: NaiveDate) -> Vec<Alerta> {
     let mut out = Vec::new();
     for multa in m {
@@ -327,13 +365,13 @@ pub fn alertas_multas(m: &[MultaAlerta], hoje: NaiveDate) -> Vec<Alerta> {
                         carro_id: Some(multa.carro_id),
                         motorista_id: None,
                         ref_id: multa.id,
-                        titulo: format!(
-                            "Identificar condutor até {:02} {}",
-                            prazo.day(),
-                            mes_pt(prazo.month())
-                        ),
+                        titulo: "Identificar condutor".to_string(),
                         falta_km: None,
                         falta_dias: Some(dias(prazo, hoje)),
+                        motivo: None,
+                        data: Some(prazo),
+                        matricula: None,
+                        nome: None,
                     });
                 }
             }
@@ -351,6 +389,10 @@ pub fn alertas_multas(m: &[MultaAlerta], hoje: NaiveDate) -> Vec<Alerta> {
                         titulo: "Multa por pagar".to_string(),
                         falta_km: None,
                         falta_dias: Some(falta),
+                        motivo: None,
+                        data: Some(venc),
+                        matricula: None,
+                        nome: None,
                     });
                 }
             }
@@ -424,6 +466,10 @@ mod testes {
             titulo: String::new(),
             falta_km: fk,
             falta_dias: fd,
+            motivo: None,
+            data: None,
+            matricula: None,
+            nome: None,
         }
     }
 
@@ -441,6 +487,8 @@ mod testes {
         assert_eq!(r[0].tipo, TipoAlerta::Manutencao);
         assert_eq!(r[0].falta_km, Some(500));
         assert_eq!(r[0].falta_dias, None);
+        assert_eq!(r[0].motivo, Some(Motivo::Km));
+        assert_eq!(r[0].data, None);
         assert_eq!(r[0].titulo, "Mudança de óleo");
         assert_eq!(r[0].carro_id, Some(1));
         assert_eq!(r[0].ref_id, 9);
@@ -467,7 +515,10 @@ mod testes {
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].nivel, Nivel::Vencido);
         assert_eq!(r[0].falta_dias, Some(-19));
-        assert_eq!(r[0].falta_km, Some(14_000));
+        // só a dimensão que decide o nível vem preenchida
+        assert_eq!(r[0].falta_km, None);
+        assert_eq!(r[0].motivo, Some(Motivo::Dias));
+        assert_eq!(r[0].data, Some(d(2026, 10, 1)));
     }
 
     #[test]
@@ -544,6 +595,7 @@ mod testes {
         let r = alertas_documentos(&[doc(h + Duration::days(30))], h);
         assert_eq!(r[0].nivel, Nivel::Proximo);
         assert_eq!(r[0].falta_dias, Some(30));
+        assert_eq!(r[0].data, Some(h + Duration::days(30)));
         assert_eq!(r[0].titulo, "IUC");
         assert_eq!(r[0].tipo, TipoAlerta::Documento);
         assert!(alertas_documentos(&[doc(h + Duration::days(31))], h).is_empty());
@@ -569,6 +621,8 @@ mod testes {
         assert_eq!(r[0].motorista_id, Some(5));
         assert_eq!(r[0].carro_id, None);
         assert_eq!(r[0].titulo, "Carta de condução");
+        assert_eq!(r[0].nome.as_deref(), Some("Rui"));
+        assert_eq!(r[0].data, Some(h + Duration::days(60)));
         assert!(alertas_cartas(&[c(h + Duration::days(61))], h).is_empty());
         let r = alertas_cartas(&[c(h - Duration::days(2))], h);
         assert_eq!(r[0].nivel, Nivel::Vencido);
@@ -648,6 +702,23 @@ mod testes {
     }
 
     #[test]
+    fn manutencao_mostra_a_dimensao_que_decide() {
+        // km perto (falta 500) e data longe: decide o km
+        let r = alertas_manutencao(&[carro(64_500)], &[plano(Some(15_000), Some(12))], &[], &lim(), hoje());
+        assert_eq!((r[0].motivo, r[0].falta_km, r[0].falta_dias), (Some(Motivo::Km), Some(500), None));
+        // km longe e data perto (falta 10 dias): decide a data
+        let mut c = carro(51_000);
+        c.base_data = d(2025, 10, 30);
+        let r = alertas_manutencao(&[c], &[plano(Some(15_000), Some(12))], &[], &lim(), hoje());
+        assert_eq!((r[0].motivo, r[0].falta_km, r[0].falta_dias), (Some(Motivo::Dias), None, Some(10)));
+        assert_eq!(r[0].data, Some(d(2026, 10, 30)));
+        // serializa em camelCase e a data como "AAAA-MM-DD"
+        let j = serde_json::to_value(&r[0]).unwrap();
+        assert_eq!(j["motivo"], "dias");
+        assert_eq!(j["data"], "2026-10-30");
+    }
+
+    #[test]
     fn identificar_condutor_proximo_e_vencido() {
         let m = multa(Some(d(2026, 10, 1)), false);
         let r = alertas_multas(&[m], d(2026, 10, 20));
@@ -655,7 +726,8 @@ mod testes {
         assert_eq!(r[0].nivel, Nivel::Proximo);
         assert_eq!(r[0].tipo, TipoAlerta::IdentificarCondutor);
         assert_eq!(r[0].falta_dias, Some(3));
-        assert_eq!(r[0].titulo, "Identificar condutor até 23 out");
+        assert_eq!(r[0].titulo, "Identificar condutor");
+        assert_eq!(r[0].data, Some(d(2026, 10, 23)));
         assert_eq!(r[0].carro_id, Some(1));
         assert_eq!(r[0].ref_id, 11);
         let identificado = multa(Some(d(2026, 10, 1)), true);
@@ -731,6 +803,7 @@ mod testes {
         assert_eq!(r[0].titulo, "Multa por pagar");
         assert_eq!(r[0].nivel, Nivel::Proximo);
         assert_eq!(r[0].falta_dias, Some(21));
+        assert_eq!(r[0].data, Some(d(2026, 11, 10)));
         m.pago = true;
         assert!(alertas_multas(&[m], hoje()).is_empty());
         m.pago = false;

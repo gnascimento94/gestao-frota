@@ -35,7 +35,7 @@ function carro(id: number, matricula: string, extra: Partial<Carro> = {}): Carro
 }
 
 const relatorioVazio: Relatorio = {
-  resumo: { total: 0, porCategoria: {}, porMes: {}, porCarro: [], porPagar: 0 },
+  resumo: { total: 0, porCategoria: {}, porMes: {}, totalPorMes: {}, porCarro: [], porPagar: 0 },
   porMotorista: [],
   porTipoManutencao: [],
   manutencao: { interna: 0, oficina: 0, pecas: 0, maoObra: 0, naoDiscriminado: 0, porOficina: [] },
@@ -257,6 +257,18 @@ describe('Motoristas', () => {
     expect(botoes).toHaveLength(1)
     await user.click(botoes[0])
     await waitFor(() => expect(m.marcarReembolsado).toHaveBeenCalledWith(9, expect.any(String)))
+  })
+
+  test('`inicial` abre esse motorista, mesmo inativo', async () => {
+    const rui: Motorista = { ...ana, id: 5, nome: 'Rui', ativo: false, alertaCarta: null }
+    m.motoristasListar.mockImplementation(async (soAtivos) => (soAtivos ? [ana] : [ana, rui]))
+    m.multasMotorista.mockResolvedValue({ n: 0, total: 0, empresa: 0, colaborador: 0, porReembolsar: 0, pontos3Anos: 0 })
+    m.multasListar.mockResolvedValue([])
+    render(<Motoristas ano={2026} inicial={5} />)
+    expect(await screen.findByRole('heading', { name: 'Rui' })).toBeTruthy()
+    expect((screen.getByLabelText('Mostrar inativos') as HTMLInputElement).checked).toBe(true)
+    render(<Motoristas ano={2026} inicial={3} />)
+    expect(await screen.findByRole('heading', { name: 'Ana' })).toBeTruthy()
   })
 
   test('erro ao carregar a ficha aparece num aviso', async () => {

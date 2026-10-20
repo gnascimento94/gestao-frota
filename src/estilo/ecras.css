@@ -433,16 +433,14 @@
   position: relative;
 }
 
-.filtro-carros summary {
+.filtro-carros-botao {
   cursor: pointer;
-  list-style: none;
+  text-align: left;
+  font: inherit;
+  font-size: 0.875rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.filtro-carros summary::-webkit-details-marker {
-  display: none;
 }
 
 .filtro-carros-lista {

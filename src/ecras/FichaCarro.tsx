@@ -12,7 +12,7 @@ import {
   pagarDocumento,
   relatorio,
 } from '../api/comandos'
-import type { Carro, EstadoMulta, HistoricoItem, TipoLancamento } from '../api/tipos'
+import type { Carro, Categoria, EstadoMulta, HistoricoItem, TipoLancamento } from '../api/tipos'
 import type { Ecra } from '../App'
 import { Botao } from '../ui/Botao'
 import { CampoSelecao } from '../ui/Campo'
@@ -23,7 +23,8 @@ import { useDesfazer } from '../ui/useDesfazer'
 import { formatarData, formatarEuros, formatarKm } from '../util/formato'
 import { AcaoData } from './AcaoData'
 import { FormCarro } from './Carros'
-import { ROTULO_CATEGORIA, ROTULO_ESTADO, ROTULO_ESTADO_MULTA, hoje, paraErroApi, useCarregar } from './comum'
+import { ROTULO_CATEGORIA } from '../util/categorias'
+import { ROTULO_ESTADO, ROTULO_ESTADO_MULTA, hoje, paraErroApi, useCarregar } from './comum'
 
 type Separador = 'historico' | 'manutencao' | 'pneu' | 'documento' | 'multa' | 'motoristas' | 'km'
 
@@ -202,7 +203,7 @@ export function FichaCarro({ id, ano, versao = 0, onNavegar, onLancar }: FichaPr
         </div>
         {dados.porCategoria.map(([cat, valor]) => (
           <div className="metrica" key={cat}>
-            <div className="metrica-rotulo">{ROTULO_CATEGORIA[cat] ?? cat} em {ano}</div>
+            <div className="metrica-rotulo">{ROTULO_CATEGORIA[cat as Categoria] ?? cat} em {ano}</div>
             <div className="metrica-valor">{formatarEuros(valor)}</div>
           </div>
         ))}

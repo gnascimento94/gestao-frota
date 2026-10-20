@@ -21,56 +21,65 @@ function alerta(extra: Partial<Alerta>): Alerta {
     titulo: 'Mudança de óleo',
     faltaKm: null,
     faltaDias: null,
+    motivo: null,
+    data: null,
+    matricula: 'AA-12-BB',
+    nome: null,
     ...extra,
   }
 }
 
-const ctx = {
-  hoje: '2026-10-20',
-  matricula: () => 'AA-12-BB',
-  motorista: () => ({ nome: 'João Silva', cartaValidade: '2026-12-12' }),
-  limiares: { km: 1000, dias: 30 },
-}
-
-describe('textos dos alertas', () => {
-  test('manutenção por KM e por dias', () => {
-    expect(textoAlerta(alerta({ faltaKm: 420 }), ctx)).toBe('AA-12-BB · Mudança de óleo · faltam 420 km')
-    expect(textoAlerta(alerta({ nivel: 'vencido', faltaKm: -200, faltaDias: 100 }), ctx)).toBe(
+describe('textos dos alertas (dados do núcleo)', () => {
+  test('manutenção: a dimensão indicada pelo núcleo', () => {
+    expect(textoAlerta(alerta({ motivo: 'km', faltaKm: 420 }), 2026)).toBe('AA-12-BB · Mudança de óleo · faltam 420 km')
+    expect(textoAlerta(alerta({ nivel: 'vencido', motivo: 'km', faltaKm: -200 }), 2026)).toBe(
       'AA-12-BB · Mudança de óleo · passou 200 km',
     )
-    expect(textoAlerta(alerta({ faltaKm: 5000, faltaDias: 5 }), ctx)).toBe(
+    expect(textoAlerta(alerta({ motivo: 'dias', faltaDias: 5, data: '2026-10-25' }), 2026)).toBe(
       'AA-12-BB · Mudança de óleo · faltam 5 dias',
+    )
+    expect(textoAlerta(alerta({ nivel: 'vencido', motivo: 'dias', faltaDias: 0, data: '2026-10-20' }), 2026)).toBe(
+      'AA-12-BB · Mudança de óleo · vence hoje',
     )
   })
 
-  test('documento, carta, multa e identificar condutor', () => {
+  test('documento, carta, multa e identificar condutor usam a data do núcleo', () => {
+    const iuc = alerta({ tipo: 'documento', titulo: 'IUC' })
+    expect(textoAlerta({ ...iuc, faltaDias: 223, data: '2027-05-31' }, 2026)).toBe('AA-12-BB · IUC · vence a 31 mai 2027')
+    expect(textoAlerta({ ...iuc, faltaDias: 11, data: '2026-10-31' }, 2026)).toBe('AA-12-BB · IUC · vence a 31 out')
+    expect(textoAlerta({ ...iuc, faltaDias: 0, data: '2026-10-20' }, 2026)).toBe('AA-12-BB · IUC · vence hoje')
     expect(
-      textoAlerta(alerta({ tipo: 'documento', titulo: 'IUC', faltaDias: 223 }), { ...ctx, hoje: '2026-10-20' }),
-    ).toBe('AA-12-BB · IUC · vence a 31 mai 2027')
-    expect(textoAlerta(alerta({ tipo: 'documento', titulo: 'IUC', faltaDias: 11 }), ctx)).toBe(
-      'AA-12-BB · IUC · vence a 31 out',
-    )
-    expect(
-      textoAlerta(alerta({ tipo: 'carta', carroId: null, motoristaId: 4, titulo: 'Carta de condução', faltaDias: 53 }), ctx),
+      textoAlerta(
+        alerta({
+          tipo: 'carta', carroId: null, matricula: null, motoristaId: 4, nome: 'João Silva',
+          titulo: 'Carta de condução', faltaDias: 53, data: '2026-12-12',
+        }),
+        2026,
+      ),
     ).toBe('João Silva · carta caduca a 12 dez')
     expect(
-      textoAlerta(alerta({ tipo: 'identificarCondutor', titulo: 'Identificar condutor até 23 out', faltaDias: 3 }), ctx),
-    ).toBe('AA-12-BB · Identificar condutor até 23 out')
-    expect(textoAlerta(alerta({ tipo: 'multa', titulo: 'Multa por pagar', faltaDias: -2 }), ctx)).toBe(
-      'AA-12-BB · Multa por pagar · venceu a 18 out',
-    )
+      textoAlerta(alerta({ tipo: 'identificarCondutor', titulo: 'Identificar condutor', faltaDias: 3, data: '2026-10-03' }), 2026),
+    ).toBe('AA-12-BB · Identificar condutor até 3 out')
+    expect(
+      textoAlerta(alerta({ tipo: 'multa', nivel: 'vencido', titulo: 'Multa por pagar', faltaDias: -2, data: '2026-10-18' }), 2026),
+    ).toBe('AA-12-BB · Multa por pagar · venceu a 18 out')
   })
 })
 
 describe('Início', () => {
   const painel: Painel = {
+    ano: 2025,
+    mes: 12,
     gastoMes: 128450,
     gastoAno: 1894230,
     porPagar: 61200,
     carrosAtivos: 23,
     alertas: [
-      alerta({ nivel: 'vencido', faltaKm: -200 }),
-      alerta({ tipo: 'carta', carroId: null, motoristaId: 4, refId: 4, titulo: 'Carta de condução', faltaDias: 53 }),
+      alerta({ nivel: 'vencido', motivo: 'km', faltaKm: -200 }),
+      alerta({
+        tipo: 'carta', carroId: null, matricula: null, motoristaId: 4, refId: 4, nome: 'João Silva',
+        titulo: 'Carta de condução', faltaDias: 53, data: '2026-12-12',
+      }),
     ],
     recentes: [
       {
@@ -84,28 +93,28 @@ describe('Início', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     m.painel.mockResolvedValue(painel)
-    m.carrosListar.mockResolvedValue([
-      {
-        id: 1, matricula: 'AA-12-BB', marca: null, modelo: null, ano: null, cor: null, kmInicial: 0,
-        kmAtual: 0, dataAquisicao: null, estado: 'ativo', dataSaida: null, notas: null,
-        motoristaAtual: null, gastoAno: 0, gastoTotal: 0,
-      },
-    ])
-    m.motoristasListar.mockResolvedValue([
-      { id: 4, nome: 'João Silva', telefone: null, cartaNumero: null, cartaValidade: '2026-12-12', ativo: true, notas: null, alertaCarta: 'proximo' },
-    ])
-    m.limiaresObter.mockResolvedValue({ km: 1000, dias: 30 })
+    m.carrosListar.mockResolvedValue([])
   })
 
-  test('cartões, vencimentos com severidade e navegação', async () => {
+  test('cartões com os valores do núcleo', async () => {
+    render(<Inicio ano={2026} onNavegar={() => {}} />)
+    const kpi = async (rotulo: string) => (await screen.findByText(rotulo)).parentElement!.textContent
+    expect(await kpi('Gasto este mês')).toMatch(/1\s284,50 €dezembro/)
+    // o ano mostrado é o que o núcleo usou
+    expect(await kpi('Gasto no ano')).toMatch(/18\s942,30 €2025/)
+    expect(await kpi('Por pagar (hoje)')).toMatch(/612,00 €/)
+    expect(await kpi('Carros ativos')).toMatch(/23/)
+    expect(m.limiaresObter).not.toHaveBeenCalled()
+  })
+
+  test('vencimentos com severidade e navegação', async () => {
     const onNavegar = vi.fn()
     const user = userEvent.setup()
     render(<Inicio ano={2026} onNavegar={onNavegar} />)
     const venc = await screen.findByRole('region', { name: /^Próximos vencimentos/ })
-    expect(screen.getByText('Por pagar (hoje)')).toBeTruthy()
-    expect(screen.getByText('Carros ativos')).toBeTruthy()
     const linhas = within(venc).getAllByRole('button')
     expect(linhas[0].textContent).toContain('AA-12-BB · Mudança de óleo · passou 200 km')
+    expect(linhas[1].textContent).toContain('João Silva · carta caduca a 12 dez 2026')
     expect(linhas[0].querySelector('.faixa-vencido')).toBeTruthy()
     expect(linhas[1].querySelector('.faixa-proximo')).toBeTruthy()
     await user.click(linhas[0])

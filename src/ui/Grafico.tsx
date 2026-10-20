@@ -1,9 +1,9 @@
 // Gráfico de barras empilhadas por mês (SVG próprio, sem bibliotecas).
-// Recebe os valores já calculados pelo núcleo; aqui só se escala e desenha.
+// Valores e totais vêm do núcleo; aqui só se escala e desenha.
 
-import { useState } from 'react'
+import { useRef, useState, type KeyboardEvent } from 'react'
 import type { Categoria } from '../api/tipos'
-import { ORDEM_CATEGORIAS, ROTULO_CATEGORIA } from '../ecras/comum'
+import { ORDEM_CATEGORIAS, ROTULO_CATEGORIA } from '../util/categorias'
 import { formatarEuros, formatarEurosCurto, formatarMes } from '../util/formato'
 import { escala } from './escala'
 
@@ -12,6 +12,8 @@ export interface MesGrafico {
   mes: string
   /** Cêntimos por categoria. */
   valores: Partial<Record<Categoria, number>>
+  /** Total do mês (cêntimos), enviado pelo núcleo. */
+  total: number
 }
 
 export interface GraficoProps {
@@ -31,67 +33,103 @@ function caminhoTopo(x: number, y: number, w: number, h: number, r: number): str
   return `M${x},${y + h}V${y + rr}Q${x},${y} ${x + rr},${y}H${x + w - rr}Q${x + w},${y} ${x + w},${y + rr}V${y + h}Z`
 }
 
-function somaMes(m: MesGrafico): number {
-  return ORDEM_CATEGORIAS.reduce((s, c) => s + (m.valores[c] ?? 0), 0)
+/** Texto acessível de um mês: "março 2026: 70,00 € (Manutenção 20,00 €, Pneus 50,00 €)". */
+function descreverMes(m: MesGrafico): string {
+  const partes = ORDEM_CATEGORIAS.filter((c) => (m.valores[c] ?? 0) > 0).map(
+    (c) => `${ROTULO_CATEGORIA[c]} ${formatarEuros(m.valores[c] ?? 0)}`,
+  )
+  return `${formatarMes(m.mes)}: ${formatarEuros(m.total)}${partes.length ? ` (${partes.join(', ')})` : ''}`
 }
 
 export function Grafico({ meses, cores }: GraficoProps) {
   const [ativo, setAtivo] = useState<number | null>(null)
-  const totais = meses.map(somaMes)
-  const { maximo, marcas } = escala(Math.max(0, ...totais))
+  // Navegação por teclado: um só ponto de tabulação (roving tabindex), setas mudam de mês.
+  const [foco, setFoco] = useState(0)
+  const refs = useRef<(SVGGElement | null)[]>([])
+  const focavel = Math.min(foco, Math.max(meses.length - 1, 0))
+
+  const { maximo, marcas } = escala(Math.max(0, ...meses.map((m) => m.total)))
   const presentes = ORDEM_CATEGORIAS.filter((c) => meses.some((m) => (m.valores[c] ?? 0) > 0))
 
   const largura = L - M.esq - M.dir
   const altura = A - M.cima - M.baixo
   const banda = largura / Math.max(meses.length, 1)
   const barra = Math.max(4, Math.min(banda * 0.62, 40))
-  const y = (v: number) => M.cima + altura - (v / maximo) * altura
+  const y = (v: number) => M.cima + altura - (Math.min(v, maximo) / maximo) * altura
   const variosAnos = new Set(meses.map((m) => m.mes.slice(0, 4))).size > 1
   // Com muitos meses, só alguns rótulos no eixo X para não se sobreporem.
   const cadaRotulo = Math.ceil(meses.length / 12)
+
+  function tecla(e: KeyboardEvent, i: number) {
+    const destino =
+      e.key === 'ArrowRight' || e.key === 'ArrowDown'
+        ? Math.min(i + 1, meses.length - 1)
+        : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+          ? Math.max(i - 1, 0)
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? meses.length - 1
+              : null
+    if (destino === null) return
+    e.preventDefault()
+    setFoco(destino)
+    setAtivo(destino)
+    refs.current[destino]?.focus()
+  }
 
   const mesAtivo = ativo !== null ? meses[ativo] : null
 
   return (
     <div className="grafico" onMouseLeave={() => setAtivo(null)}>
-      <svg
-        viewBox={`0 0 ${L} ${A}`}
-        className="grafico-svg"
-        role="img"
-        aria-label="Gasto mensal por categoria"
-      >
-        {marcas.map((v) => (
-          <g key={v} className="grafico-marca">
-            <line x1={M.esq} x2={L - M.dir} y1={y(v)} y2={y(v)} className={v === 0 ? 'grafico-base' : 'grafico-grelha'} />
-            <text x={M.esq - 8} y={y(v)} dy="0.32em" textAnchor="end">
-              {formatarEurosCurto(v)}
-            </text>
-          </g>
-        ))}
+      <svg viewBox={`0 0 ${L} ${A}`} className="grafico-svg" role="group" aria-label="Gasto mensal por categoria">
+        <g aria-hidden="true">
+          {marcas.map((v) => (
+            <g key={v}>
+              <line
+                x1={M.esq}
+                x2={L - M.dir}
+                y1={y(v)}
+                y2={y(v)}
+                className={v === 0 ? 'grafico-base' : 'grafico-grelha'}
+              />
+              <text x={M.esq - 8} y={y(v)} dy="0.32em" textAnchor="end">
+                {formatarEurosCurto(v)}
+              </text>
+            </g>
+          ))}
+        </g>
 
         {meses.map((m, i) => {
           const x = M.esq + i * banda + (banda - barra) / 2
           const cats = ORDEM_CATEGORIAS.filter((c) => (m.valores[c] ?? 0) > 0)
           let acumulado = 0
-          const ano = m.mes.slice(2, 4)
-          const rotulo = formatarMes(m.mes, true) + (variosAnos && (i === 0 || m.mes.endsWith('-01')) ? ` ${ano}` : '')
+          const rotulo =
+            formatarMes(m.mes, true) + (variosAnos && (i === 0 || m.mes.endsWith('-01')) ? ` ${m.mes.slice(2, 4)}` : '')
           return (
             <g
               key={m.mes}
+              ref={(el) => {
+                refs.current[i] = el
+              }}
               data-mes={m.mes}
               className={ativo === i ? 'grafico-mes grafico-mes-ativo' : 'grafico-mes'}
+              role="img"
+              aria-label={descreverMes(m)}
+              tabIndex={i === focavel ? 0 : -1}
               onMouseEnter={() => setAtivo(i)}
-              onFocus={() => setAtivo(i)}
+              onFocus={() => {
+                setFoco(i)
+                setAtivo(i)
+              }}
               onBlur={() => setAtivo(null)}
-              tabIndex={0}
-              aria-label={`${formatarMes(m.mes)}: ${formatarEuros(totais[i])}`}
+              onKeyDown={(e) => tecla(e, i)}
             >
               {/* Alvo de hover maior do que a barra (a banda inteira). */}
               <rect x={M.esq + i * banda} y={M.cima} width={banda} height={altura} className="grafico-alvo" />
               {cats.map((c, j) => {
-                const v = m.valores[c] ?? 0
                 const y0 = y(acumulado)
-                acumulado += v
+                acumulado += m.valores[c] ?? 0
                 const y1 = y(acumulado)
                 const ultimo = j === cats.length - 1
                 // Folga de 2px entre segmentos (sem comer segmentos muito finos).
@@ -106,7 +144,13 @@ export function Grafico({ meses, cores }: GraficoProps) {
                 )
               })}
               {i % cadaRotulo === 0 && (
-                <text x={M.esq + i * banda + banda / 2} y={A - 8} textAnchor="middle" className="grafico-rotulo">
+                <text
+                  x={M.esq + i * banda + banda / 2}
+                  y={A - 8}
+                  textAnchor="middle"
+                  className="grafico-rotulo"
+                  aria-hidden="true"
+                >
                   {rotulo}
                 </text>
               )}
@@ -134,7 +178,7 @@ export function Grafico({ meses, cores }: GraficoProps) {
           ))}
           <span className="grafico-dica-linha grafico-dica-total">
             Total
-            <b>{formatarEuros(totais[ativo])}</b>
+            <b>{formatarEuros(mesAtivo.total)}</b>
           </span>
         </div>
       )}

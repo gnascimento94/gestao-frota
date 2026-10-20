@@ -113,6 +113,13 @@ export function Motoristas({
   })
   const buscar = useCallback(() => motoristasListar(!mostrarTodos), [mostrarTodos])
   const { dados, erro, recarregar } = useCarregar(buscar, versao)
+  // O motorista pedido à entrada pode estar inativo: nesse caso passa-se a mostrar todos
+  // (uma só vez; ajuste durante o render, sem efeito).
+  const [procurarInativo, setProcurarInativo] = useState(inicial !== undefined)
+  if (procurarInativo && dados) {
+    setProcurarInativo(false)
+    if (!mostrarTodos && !dados.some((m) => m.id === inicial)) setMostrarTodos(true)
+  }
   const atual = dados?.find((m) => m.id === selecionado) ?? null
   const fechar = () => setFolha((f) => ({ ...f, aberta: false }))
 

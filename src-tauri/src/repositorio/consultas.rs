@@ -21,6 +21,9 @@ use std::collections::{BTreeMap, HashMap};
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Painel {
+    /// Ano e mês (1–12) de "hoje" usados nos gastos do mês e do ano.
+    pub ano: i32,
+    pub mes: u32,
     pub gasto_mes: i64,
     pub gasto_ano: i64,
     pub por_pagar: i64,
@@ -197,6 +200,8 @@ pub fn painel(conn: &Connection, hoje: NaiveDate) -> Res<Painel> {
         |r| r.get(0),
     )?;
     Ok(Painel {
+        ano: hoje.year(),
+        mes: hoje.month(),
         gasto_mes: mes.total,
         gasto_ano: ano.total,
         por_pagar,
@@ -516,6 +521,13 @@ pub fn alertas(conn: &Connection, hoje: NaiveDate) -> Res<Vec<Alerta>> {
     out.extend(alertas_documentos(&docs, hoje));
     out.extend(alertas_cartas(&cartas, hoje));
     out.extend(alertas_multas(&multas, hoje));
+    let mut st = conn.prepare("SELECT id, matricula FROM carros")?;
+    let matriculas = st
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    for a in &mut out {
+        a.matricula = a.carro_id.and_then(|id| matriculas.get(&id).cloned());
+    }
     ordenar(&mut out);
     Ok(out)
 }

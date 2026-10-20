@@ -39,6 +39,8 @@ pub struct Resumo {
     pub total: i64,
     pub por_categoria: BTreeMap<Categoria, i64>,
     pub por_mes: BTreeMap<String, BTreeMap<Categoria, i64>>,
+    /// Total de cada mês ("AAAA-MM"), soma das categorias de `por_mes`.
+    pub total_por_mes: BTreeMap<String, i64>,
     pub por_carro: Vec<(i64, i64)>,
     pub por_pagar: i64,
 }
@@ -61,6 +63,7 @@ pub fn resumir(despesas: &[Despesa], p: &Periodo) -> Resumo {
         total: 0,
         por_categoria: BTreeMap::new(),
         por_mes: BTreeMap::new(),
+        total_por_mes: BTreeMap::new(),
         por_carro: Vec::new(),
         por_pagar: 0,
     };
@@ -74,6 +77,7 @@ pub fn resumir(despesas: &[Despesa], p: &Periodo) -> Resumo {
         r.total += d.valor;
         *r.por_categoria.entry(d.categoria).or_insert(0) += d.valor;
         let mes = format!("{:04}-{:02}", data.year(), data.month());
+        *r.total_por_mes.entry(mes.clone()).or_insert(0) += d.valor;
         *r.por_mes
             .entry(mes)
             .or_default()

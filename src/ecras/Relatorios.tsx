@@ -1,22 +1,23 @@
-import { useCallback, useId, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { carrosListar, motoristasListar, relatorio } from '../api/comandos'
-import type { Categoria, Infracao, Relatorio } from '../api/tipos'
+import type { Categoria, FiltroRelatorio, Infracao, Relatorio } from '../api/tipos'
 import type { Ecra } from '../App'
 import { CampoSelecao } from '../ui/Campo'
 import { Cartao } from '../ui/Cartao'
 import { Grafico } from '../ui/Grafico'
+import { CORES_CATEGORIA, ORDEM_CATEGORIAS, ROTULO_CATEGORIA } from '../util/categorias'
 import { formatarEuros } from '../util/formato'
-import {
-  CORES_CATEGORIA,
-  ORDEM_CATEGORIAS,
-  ROTULO_CATEGORIA,
-  ROTULO_INFRACAO,
-  hoje,
-  useCarregar,
-} from './comum'
+import { ROTULO_INFRACAO, hoje, paraErroApi, useCarregar } from './comum'
 import { dataValida, mesesDoPeriodo, periodoDe, type Periodo, type Preset } from './periodos'
 
 type Escolha = Preset | 'personalizado'
+
+/** Resposta de um pedido, com a chave do filtro que a pediu. */
+interface Resposta {
+  chave: string
+  r: Relatorio | null
+  erro: string | null
+}
 
 const PRESETS: [Escolha, string][] = [
   ['esteMes', 'Este mês'],
@@ -81,7 +82,7 @@ function Metrica({ rotulo, valor, nota }: { rotulo: string; valor: string; nota?
   )
 }
 
-/** Escolha de vários carros (vazio = todos). */
+/** Escolha de vários carros (vazio = todos). Fecha com Esc e com clique fora. */
 function FiltroCarros({
   carros,
   escolhidos,
@@ -91,6 +92,32 @@ function FiltroCarros({
   escolhidos: number[]
   onMudar(ids: number[]): void
 }) {
+  const [aberto, setAberto] = useState(false)
+  const raiz = useRef<HTMLDivElement>(null)
+  const botao = useRef<HTMLButtonElement>(null)
+  const idRotulo = useId()
+  const idBotao = useId()
+  const idLista = useId()
+
+  useEffect(() => {
+    if (!aberto) return
+    const fora = (e: MouseEvent) => {
+      if (raiz.current && !raiz.current.contains(e.target as Node)) setAberto(false)
+    }
+    const tecla = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setAberto(false)
+      botao.current?.focus()
+    }
+    document.addEventListener('mousedown', fora)
+    document.addEventListener('keydown', tecla)
+    return () => {
+      document.removeEventListener('mousedown', fora)
+      document.removeEventListener('keydown', tecla)
+    }
+  }, [aberto])
+
   const resumo =
     escolhidos.length === 0
       ? 'Todos os carros'
@@ -98,15 +125,25 @@ function FiltroCarros({
         ? (carros.find((c) => c.id === escolhidos[0])?.matricula ?? '1 carro')
         : `${escolhidos.length} carros`
   return (
-    <div className="campo">
-      <span className="campo-rotulo-falso" id="rotulo-carros">
+    <div className="campo filtro-carros" ref={raiz}>
+      <span className="campo-rotulo-falso" id={idRotulo}>
         Carros
       </span>
-      <details className="filtro-carros">
-        <summary className="campo-entrada" aria-describedby="rotulo-carros">
-          {resumo}
-        </summary>
-        <div className="filtro-carros-lista" role="group" aria-labelledby="rotulo-carros">
+      <button
+        ref={botao}
+        id={idBotao}
+        type="button"
+        className="campo-entrada filtro-carros-botao"
+        aria-haspopup="true"
+        aria-expanded={aberto}
+        aria-controls={aberto ? idLista : undefined}
+        aria-labelledby={`${idRotulo} ${idBotao}`}
+        onClick={() => setAberto((a) => !a)}
+      >
+        {resumo}
+      </button>
+      {aberto && (
+        <div id={idLista} className="filtro-carros-lista" role="group" aria-labelledby={idRotulo}>
           <button type="button" className="filtro-carros-todos" onClick={() => onMudar([])}>
             Todos os carros
           </button>
@@ -123,7 +160,7 @@ function FiltroCarros({
             </label>
           ))}
         </div>
-      </details>
+      )}
     </div>
   )
 }
@@ -163,21 +200,35 @@ export function Relatorios({ versao = 0, onNavegar }: RelatoriosProps) {
   const { dados: opcoes } = useCarregar(listas, versao)
 
   const chaveCarros = carroIds.join(',')
-  const buscar = useCallback(async (): Promise<Relatorio | null> => {
+  // Cada resposta leva a chave do filtro que a pediu: enquanto chega a de um filtro novo,
+  // os números do anterior não ficam à vista (só uma recarga do mesmo filtro os mantém).
+  const chave = JSON.stringify([periodo.de, periodo.ate, chaveCarros, motoristaId])
+  const buscar = useCallback(async (): Promise<Resposta | null> => {
     if (invalido) return null
-    return relatorio({
+    const filtro: FiltroRelatorio = {
       de: periodo.de,
       ate: periodo.ate,
       carroIds: chaveCarros ? chaveCarros.split(',').map(Number) : null,
       motoristaId,
-    })
+    }
+    const pedida = JSON.stringify([filtro.de, filtro.ate, chaveCarros, motoristaId])
+    try {
+      return { chave: pedida, r: await relatorio(filtro), erro: null }
+    } catch (e) {
+      return { chave: pedida, r: null, erro: paraErroApi(e).mensagem }
+    }
   }, [invalido, periodo.de, periodo.ate, chaveCarros, motoristaId])
-  const { dados: r, erro } = useCarregar(buscar, versao)
+  const { dados: resposta, erro: erroCarga } = useCarregar(buscar, versao)
+  const atual = resposta?.chave === chave ? resposta : null
+  const erro = atual?.erro ?? erroCarga
+  const r = erro ? null : (atual?.r ?? null)
+  const aCarregar = !invalido && !erro && !r
 
   const matricula = (id: number) => opcoes?.carros.find((c) => c.id === id)?.matricula ?? `Carro ${id}`
   const meses = mesesDoPeriodo(periodo.de, periodo.ate).map((mes) => ({
     mes,
     valores: r?.resumo.porMes[mes] ?? {},
+    total: r?.resumo.totalPorMes[mes] ?? 0,
   }))
 
   function escolher(e: Escolha) {
@@ -256,6 +307,12 @@ export function Relatorios({ versao = 0, onNavegar }: RelatoriosProps) {
       {(invalido || erro) && (
         <p className="form-erro" role="alert">
           {invalido ?? erro}
+        </p>
+      )}
+
+      {aCarregar && (
+        <p className="vazio-lista" role="status">
+          A carregar o relatório…
         </p>
       )}
 

@@ -7,7 +7,7 @@ use super::motoristas::*;
 use super::multas::*;
 use super::planos::*;
 use crate::migracoes::migrar;
-use crate::regras::alertas::{Limiares, Nivel, TipoAlerta};
+use crate::regras::alertas::{Limiares, Motivo, Nivel, TipoAlerta};
 use crate::regras::gastos::Categoria;
 use chrono::NaiveDate;
 use rusqlite::Connection;
@@ -1068,6 +1068,9 @@ fn painel_conta_alertas_de_carros_ativos_apenas() {
     assert_eq!(p.alertas[0].tipo, TipoAlerta::Manutencao);
     assert_eq!(p.alertas[0].carro_id, Some(ativo));
     assert_eq!(p.alertas[0].falta_km, Some(-1_000));
+    assert_eq!(p.alertas[0].matricula.as_deref(), Some("AA-12-BB"));
+    assert_eq!(p.alertas[0].motivo, Some(Motivo::Km));
+    assert_eq!((p.ano, p.mes), (2026, 10));
     assert_eq!(p.gasto_mes, 1_000); // pneus do vendido em outubro
     assert_eq!(p.gasto_ano, 1_000);
     assert_eq!(p.por_pagar, 2_000); // só o documento do carro ativo
@@ -1198,6 +1201,55 @@ fn erro_sem_campo_nao_serializa_campo() {
     assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"codigo":"so_consulta","mensagem":"Só consulta."}"#);
     let e = e.com_campo("pagoEm");
     assert!(serde_json::to_string(&e).unwrap().contains(r#""campo":"pagoEm""#));
+}
+
+#[test]
+fn alertas_trazem_matricula_nome_e_data() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let mut joao = MotoristaInput {
+        id: None,
+        nome: "João Silva".into(),
+        telefone: None,
+        carta_numero: None,
+        carta_validade: Some("2026-12-12".into()),
+        ativo: true,
+        notas: None,
+    };
+    let jid = guardar_motorista(&c, &joao).unwrap();
+    joao.id = Some(jid);
+    lancar_documento(&mut c, &doc(a, "IUC", 2_000, "2026-10-31", None), hoje()).unwrap();
+    let al = alertas(&c, hoje()).unwrap();
+    let docu = al.iter().find(|x| x.tipo == TipoAlerta::Documento).unwrap();
+    assert_eq!(docu.matricula.as_deref(), Some("AA-12-BB"));
+    assert_eq!(docu.data, Some(d(2026, 10, 31)));
+    let carta = al.iter().find(|x| x.tipo == TipoAlerta::Carta).unwrap();
+    assert_eq!(carta.nome.as_deref(), Some("João Silva"));
+    assert_eq!(carta.matricula, None);
+    assert_eq!(carta.data, Some(d(2026, 12, 12)));
+    let json = serde_json::to_value(docu).unwrap();
+    assert_eq!(json["data"], "2026-10-31");
+    assert_eq!(json["matricula"], "AA-12-BB");
+}
+
+#[test]
+fn relatorio_traz_total_por_mes() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    lancar_manutencao(&mut c, &manut(a, "2026-03-01", None), hoje()).unwrap();
+    lancar_pneu(&mut c, &pneu(a, "2026-03-05", 2_500), hoje()).unwrap();
+    let r = relatorio(
+        &c,
+        &FiltroRelatorio {
+            de: "2026-01-01".into(),
+            ate: "2026-12-31".into(),
+            carro_ids: None,
+            motorista_id: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(r.resumo.total_por_mes.get("2026-03"), Some(&3_500));
+    assert_eq!(r.resumo.total_por_mes.len(), 1);
 }
 
 #[test]
