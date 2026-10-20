@@ -29,6 +29,7 @@ ureq = "3.4.2"
 sha2 = "0.11.1"
 minisign-verify = "0.3.0"
 semver = "1.0.28"
+tauri-plugin-single-instance = "2"
 
 [dev-dependencies]
 tempfile = "3.27.0"

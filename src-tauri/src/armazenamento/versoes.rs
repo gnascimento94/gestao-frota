@@ -11,7 +11,8 @@ const MAX_ANTES_DA: usize = 5;
 const PREFIXO_DATADA: &str = "frota_2";
 const PREFIXO_ANTES: &str = "frota_antes-da-";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Versao {
     pub nome: String,
     pub data: String,
