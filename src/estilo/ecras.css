@@ -1,0 +1,320 @@
+/* Estilos dos ecrãs de carros, ficha, motoristas e boas-vindas. Depende de tokens.css/base.css. */
+
+.barra-ferramentas {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.barra-ferramentas .espaco {
+  margin-left: auto;
+}
+
+.interruptor {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--texto-2);
+  cursor: pointer;
+}
+
+/* Tabela de carros */
+
+.tabela-wrap {
+  overflow-x: auto;
+}
+
+.tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.tabela th {
+  text-align: left;
+  font: 600 0.75rem var(--fonte-texto);
+  letter-spacing: 0.02em;
+  color: var(--texto-3);
+  padding: 10px 18px;
+  border-bottom: var(--borda);
+  white-space: nowrap;
+}
+
+.tabela td {
+  padding: 0;
+  border-top: var(--borda);
+}
+
+.tabela tr:first-child td {
+  border-top: 0;
+}
+
+.tabela .num {
+  text-align: right;
+}
+
+.tabela td > button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: inherit;
+  padding: 12px 18px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabela tbody tr:hover td {
+  background: var(--realce);
+}
+
+.tabela td > button:focus-visible {
+  outline-offset: -2px;
+}
+
+.tabela .esmaecido {
+  color: var(--texto-3);
+}
+
+/* Ficha do carro */
+
+.ficha-topo {
+  display: flex;
+  align-items: center;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+}
+
+.matricula-grande {
+  font: 650 1.75rem/1 var(--fonte-texto);
+  letter-spacing: 0.05em;
+  border: 2px solid var(--texto);
+  border-radius: 8px;
+  padding: 8px 14px 8px 10px;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.matricula-grande::before {
+  content: 'P';
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  background: #1f4fbf;
+  border-radius: 3px;
+  padding: 5px 5px;
+}
+
+.ficha-titulos {
+  min-width: 0;
+}
+
+.ficha-sub {
+  color: var(--texto-2);
+  font-size: 0.875rem;
+}
+
+.ficha-acoes {
+  margin-left: auto;
+  display: flex;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+}
+
+.metricas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--e-3);
+}
+
+.metrica {
+  background: var(--superficie);
+  border: var(--borda);
+  border-radius: var(--raio-m);
+  padding: 14px 16px;
+}
+
+.metrica-rotulo {
+  font-size: 0.8125rem;
+  color: var(--texto-2);
+}
+
+.metrica-valor {
+  font: 650 1.5rem/1.2 var(--fonte);
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+
+.separadores {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--preenchimento);
+  border-radius: 10px;
+  align-self: flex-start;
+  flex-wrap: wrap;
+}
+
+.separador {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--texto-2);
+  cursor: pointer;
+}
+
+.separador[aria-selected='true'] {
+  background: var(--superficie);
+  color: var(--texto);
+  font-weight: 600;
+  box-shadow: var(--sombra-p);
+}
+
+.item-fim {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  flex: none;
+}
+
+.pilula-ok {
+  color: var(--verde);
+  background: color-mix(in srgb, var(--verde) 14%, transparent);
+}
+
+.pilula-neutra {
+  color: var(--texto-2);
+  background: var(--preenchimento);
+}
+
+.acao-data {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.acao-data input {
+  font-size: 0.8125rem;
+  padding: 4px 8px;
+  border: var(--borda);
+  border-radius: 7px;
+  background: var(--fundo);
+  color: var(--texto);
+}
+
+.form-erro {
+  color: var(--vermelho);
+  background: var(--vermelho-suave);
+  border-radius: var(--raio-p);
+  padding: 10px 12px;
+  font-size: 0.875rem;
+}
+
+.aviso-linha {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.cartao-corpo {
+  padding: 0 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+}
+
+.vazio-lista {
+  padding: 22px 18px;
+  color: var(--texto-2);
+  font-size: 0.875rem;
+}
+
+/* Formulários (folha e boas-vindas) */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.form-campos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  flex: 1;
+  padding: 16px 20px;
+}
+
+.form-par {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.form-rodape {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: var(--borda);
+}
+
+/* Boas-vindas */
+
+.boas-vindas {
+  max-width: 520px;
+  margin: 40px auto 0;
+}
+
+.boas-vindas h2 {
+  font: 650 1.5rem/1.2 var(--fonte);
+  letter-spacing: -0.015em;
+  margin-bottom: 6px;
+}
+
+.boas-vindas p {
+  color: var(--texto-2);
+  margin-bottom: var(--e-4);
+}
+
+.boas-vindas .form-campos {
+  padding: 0;
+  overflow: visible;
+}
+
+.boas-vindas .form-rodape {
+  padding: 16px 0 0;
+  border-top: 0;
+}
+
+/* Motoristas */
+
+.duas-colunas {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: var(--e-5);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .duas-colunas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.item-selecionado .item-corpo {
+  background: var(--destaque-suave);
+}

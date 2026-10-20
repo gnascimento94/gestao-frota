@@ -40,8 +40,13 @@ pub fn historico(conn: &Connection, carro_id: Option<i64>, limite: i64) -> Res<V
                    tipo, descricao, valor, CASE WHEN pago_em IS NULL THEN vencimento END,
                    CASE WHEN pago_em IS NULL THEN 1 ELSE 0 END, criado_em FROM documentos
             UNION ALL
-            SELECT 'multa', id, carro_id, data_infracao, NULL, infracao, descricao, valor,
-                   NULL, 0, criado_em FROM multas
+            SELECT 'multa', id, carro_id, data_infracao, NULL, infracao,
+                   CASE WHEN motorista_id IS NULL THEN 'por identificar condutor'
+                        WHEN pago_em IS NULL THEN 'por pagar'
+                        WHEN empresa_adiantou = 1 AND reembolsado_em IS NULL
+                             AND valor_empresa < valor THEN 'por reembolsar'
+                        ELSE 'fechada' END || COALESCE(' · ' || descricao, ''),
+                   valor, NULL, 0, criado_em FROM multas
             UNION ALL
             SELECT 'km', id, carro_id, data, km, NULL, NULL, NULL, NULL, 0, criado_em
               FROM leituras_km WHERE origem = 'manual'

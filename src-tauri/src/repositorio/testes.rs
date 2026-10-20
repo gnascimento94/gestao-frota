@@ -358,8 +358,13 @@ fn adiantamento_fica_por_reembolsar_ate_marcar() {
     assert_eq!(r.empresa, 4_000);
     assert_eq!(r.colaborador, 8_000);
     assert_eq!(r.por_reembolsar, 8_000);
+    // o histórico indica o estado da multa
+    let h = historico(&c, Some(a), 10).unwrap();
+    assert_eq!(h[0].detalhe.as_deref(), Some("por reembolsar"));
     marcar_reembolsado(&c, id, d(2026, 10, 1), hoje()).unwrap();
     assert_eq!(multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar, 0);
+    let h = historico(&c, Some(a), 10).unwrap();
+    assert_eq!(h[0].detalhe.as_deref(), Some("fechada"));
     // sem adiantamento não há nada por reembolsar
     let mut sem = multa(a, Some(ana), "2026-09-02", 5_000, "colaborador");
     sem.empresa_adiantou = false;

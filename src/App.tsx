@@ -5,6 +5,10 @@ import { Cartao } from './ui/Cartao'
 import { Desfazer, DesfazerProvider } from './ui/Desfazer'
 import { CabecalhoFolha, Folha } from './ui/Folha'
 import { useEstadoArmazenamento } from './ui/useEstadoArmazenamento'
+import { InicioOuBoasVindas } from './ecras/BoasVindas'
+import { Carros } from './ecras/Carros'
+import { FichaCarro } from './ecras/FichaCarro'
+import { Motoristas } from './ecras/Motoristas'
 
 export type Ecra =
   | { nome: 'inicio' }
@@ -75,6 +79,7 @@ function Concha() {
   }, [])
 
   const titulo = TITULOS[ecra.nome]
+  const [ano] = useState(() => new Date().getFullYear())
 
   return (
     <div className="app">
@@ -90,7 +95,7 @@ function Concha() {
         <header className="topo">
           <div className="topo-titulos">
             <h1 className="topo-titulo">{titulo}</h1>
-            {ecra.nome === 'carro' && <div className="topo-sub">Carro n.º {ecra.id}</div>}
+            
           </div>
           <label className="busca">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -104,7 +109,10 @@ function Concha() {
               aria-label="Procurar matrícula"
               aria-keyshortcuts="Control+K"
               value={pesquisa}
-              onChange={(e) => setPesquisa(e.target.value)}
+              onChange={(e) => {
+                setPesquisa(e.target.value)
+                if (e.target.value && ecra.nome !== 'carros') navegar({ nome: 'carros' })
+              }}
               spellCheck={false}
               autoComplete="off"
             />
@@ -115,7 +123,21 @@ function Concha() {
         <Aviso {...gravacao} />
 
         <div className="conteudo">
-          <EcraVazio titulo={titulo} />
+          {ecra.nome === 'carros' && (
+            <Carros ano={ano} pesquisa={pesquisa} onAbrir={(id) => navegar({ nome: 'carro', id })} />
+          )}
+          {ecra.nome === 'carro' && (
+            <FichaCarro key={ecra.id} id={ecra.id} ano={ano} onNavegar={navegar} onLancar={abrirLancar} />
+          )}
+          {ecra.nome === 'motoristas' && <Motoristas ano={ano} />}
+          {ecra.nome === 'inicio' && (
+            <InicioOuBoasVindas ano={ano} onNavegar={navegar}>
+              <EcraVazio titulo={titulo} />
+            </InicioOuBoasVindas>
+          )}
+          {(ecra.nome === 'relatorios' || ecra.nome === 'planos' || ecra.nome === 'backup') && (
+            <EcraVazio titulo={titulo} />
+          )}
         </div>
       </main>
 
