@@ -1,0 +1,231 @@
+/* Folha "+ Lançar" (formulários de lançamento). Depende de tokens.css/base.css/ecras.css. */
+
+.lancar {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.lancar-tipos {
+  padding: 16px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lancar .form-campos {
+  padding-top: 14px;
+}
+
+/* Controlo segmentado */
+
+.seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--preenchimento);
+  border-radius: 9px;
+}
+
+.seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+  color: var(--texto-2);
+  cursor: pointer;
+  transition:
+    background var(--suave),
+    color var(--suave);
+}
+
+.seg button:hover {
+  color: var(--texto);
+}
+
+.seg button[aria-pressed='true'] {
+  background: var(--superficie);
+  color: var(--texto);
+  font-weight: 600;
+  box-shadow: var(--sombra-p);
+}
+
+.seg button:focus-visible {
+  outline-offset: -2px;
+}
+
+.seg-tipos button {
+  padding: 7px 4px;
+}
+
+.campo-rotulo {
+  font-size: 0.8125rem;
+  color: var(--texto-2);
+  font-weight: 500;
+}
+
+/* Interruptor (switch) */
+
+.interruptor-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.interruptor-switch input {
+  appearance: none;
+  flex: none;
+  margin: 0;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--preenchimento);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.interruptor-switch input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.interruptor-switch input:checked {
+  background: var(--verde);
+}
+
+.interruptor-switch input:checked::after {
+  transform: translateX(16px);
+}
+
+.interruptor-switch input:focus-visible {
+  outline-offset: 2px;
+}
+
+.interruptor-switch small {
+  display: block;
+  color: var(--texto-3);
+  font-size: 0.75rem;
+}
+
+@media (prefers-contrast: more) {
+  .interruptor-switch input {
+    border: 1px solid var(--texto-2);
+  }
+}
+
+/* Repartição e totais */
+
+.reparte {
+  background: var(--fundo);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reparte-linha {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reparte b {
+  font-weight: 600;
+}
+
+.reparte-texto {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+/* O separador só existe para leitores de ecrã e cópia de texto; visualmente basta o espaço. */
+.reparte-sep {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: pre;
+}
+
+.barra-reparte {
+  height: 8px;
+  border-radius: 5px;
+  background: var(--laranja-suave);
+  overflow: hidden;
+  display: flex;
+}
+
+.barra-reparte i {
+  display: block;
+  background: var(--destaque);
+  transition: width 0.3s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barra-reparte i,
+  .interruptor-switch input,
+  .interruptor-switch input::after {
+    transition: none;
+  }
+}
+
+/* KM com botão "Confirmar" */
+
+.campo-com-acao {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.campo-com-acao > .campo {
+  align-self: stretch;
+}
+
+/* Toast "Lançado ✓" */
+
+.toast-zona {
+  position: fixed;
+  left: calc(var(--largura-lateral) + (100vw - var(--largura-lateral)) / 2);
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 30;
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--toast);
+  color: var(--sobre-toast);
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  box-shadow: var(--sombra-m);
+  white-space: nowrap;
+}

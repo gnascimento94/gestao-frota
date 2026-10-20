@@ -3,8 +3,8 @@ import { Aviso } from './ui/Aviso'
 import { Barra } from './ui/Barra'
 import { Cartao } from './ui/Cartao'
 import { Desfazer, DesfazerProvider } from './ui/Desfazer'
-import { CabecalhoFolha, Folha } from './ui/Folha'
 import { useEstadoArmazenamento } from './ui/useEstadoArmazenamento'
+import { Lancar } from './lancar/Lancar'
 import { InicioOuBoasVindas } from './ecras/BoasVindas'
 import { Carros } from './ecras/Carros'
 import { FichaCarro } from './ecras/FichaCarro'
@@ -42,7 +42,7 @@ function Concha() {
   const [lancar, setLancar] = useState<{
     aberta: boolean
     origem: DOMRect | null
-    /** Carro de onde foi aberta (para a Tarefa 11 o pré-selecionar). */
+    /** Carro de onde foi aberta (fica pré-selecionado). */
     carroId: number | null
   }>({ aberta: false, origem: null, carroId: null })
   const [pesquisa, setPesquisa] = useState('')
@@ -55,6 +55,8 @@ function Concha() {
     setLancar({ aberta: true, origem, carroId: carroId ?? null })
   }, [])
   const fecharLancar = useCallback(() => setLancar((l) => ({ ...l, aberta: false })), [])
+  const [versao, setVersao] = useState(0)
+  const recarregar = useCallback(() => setVersao((v) => v + 1), [])
 
   // Atalhos globais: Ctrl+N (lançar), Ctrl+K (pesquisar). Esc é tratado pela folha.
   useEffect(() => {
@@ -63,7 +65,12 @@ function Concha() {
       const k = e.key.toLowerCase()
       if (k === 'n') {
         e.preventDefault()
-        if (!lancar.aberta) abrirLancar(refLancar.current?.getBoundingClientRect() ?? null)
+        // Na ficha de um carro, esse carro fica pré-selecionado.
+        if (!lancar.aberta)
+          abrirLancar(
+            refLancar.current?.getBoundingClientRect() ?? null,
+            ecra.nome === 'carro' ? ecra.id : undefined,
+          )
       } else if (k === 'k') {
         e.preventDefault()
         if (lancar.aberta) return
@@ -73,7 +80,7 @@ function Concha() {
     }
     window.addEventListener('keydown', tecla)
     return () => window.removeEventListener('keydown', tecla)
-  }, [abrirLancar, lancar.aberta])
+  }, [abrirLancar, lancar.aberta, ecra])
 
   const navegar = useCallback((e: Ecra) => {
     setEcra(e)
@@ -124,7 +131,8 @@ function Concha() {
 
         <Aviso {...gravacao} />
 
-        <div className="conteudo">
+        {/* `versao` muda após cada lançamento: o ecrã visível volta a carregar os dados. */}
+        <div className="conteudo" key={versao}>
           {ecra.nome === 'carros' && (
             <Carros ano={ano} pesquisa={pesquisa} onAbrir={(id) => navegar({ nome: 'carro', id })} />
           )}
@@ -143,12 +151,13 @@ function Concha() {
         </div>
       </main>
 
-      <Folha aberta={lancar.aberta} origem={lancar.origem} onFechar={fecharLancar} rotulo="Lançar">
-        <CabecalhoFolha titulo="Lançar" onFechar={fecharLancar} />
-        <div className="folha-corpo">
-          <p className="texto-discreto">O formulário de lançamento chega numa próxima etapa.</p>
-        </div>
-      </Folha>
+      <Lancar
+        aberta={lancar.aberta}
+        origem={lancar.origem}
+        carroId={lancar.carroId}
+        onFechar={fecharLancar}
+        onLancado={recarregar}
+      />
 
       <Desfazer />
     </div>

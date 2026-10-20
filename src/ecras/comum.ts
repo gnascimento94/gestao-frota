@@ -1,4 +1,4 @@
-// Utilitários partilhados pelos ecrãs de carros e motoristas.
+// Utilitários partilhados pelos ecrãs de carros e motoristas e pela folha Lançar.
 // Estados e alertas (multas, cartas, documentos por pagar) vêm do núcleo em Rust já calculados;
 // aqui não se reimplementa nenhuma regra.
 
@@ -27,15 +27,33 @@ export function paraErroApi(e: unknown): ErroApi {
   return { codigo: 'desconhecido', mensagem: typeof e === 'string' ? e : 'Ocorreu um erro inesperado.' }
 }
 
-export type CampoErro = 'matricula' | 'data' | 'dataSaida' | 'km' | 'valor' | 'ano' | 'geral'
+export type CampoErro =
+  | 'matricula'
+  | 'carro'
+  | 'data'
+  | 'dataSaida'
+  | 'dataInfracao'
+  | 'km'
+  | 'valor'
+  | 'valorEmpresa'
+  | 'oficina'
+  | 'tipo'
+  | 'pontos'
+  | 'ano'
+  | 'geral'
 
 /** Mapa `codigo → campo` dos erros de validação do núcleo. */
 export function campoDoErro(codigo: string): CampoErro {
   if (codigo.startsWith('matricula_')) return 'matricula'
   if (codigo === 'data_saida_invalida') return 'dataSaida'
-  if (codigo.startsWith('data_')) return 'data'
+  if (codigo === 'falta_data_infracao') return 'dataInfracao'
+  if (codigo.startsWith('data_')) return 'data' // data_futura, data_invalida, data_antes_aquisicao
   if (codigo === 'km_abaixo' || codigo === 'km_invalido') return 'km'
-  if (codigo === 'valor_invalido') return 'valor'
+  if (codigo === 'valor_invalido' || codigo === 'valor_nao_bate' || codigo === 'mao_obra_propria')
+    return 'valor'
+  if (codigo === 'coparticipacao_invalida') return 'valorEmpresa'
+  if (codigo === 'falta_oficina') return 'oficina'
+  if (codigo === 'pontos_invalidos') return 'pontos'
   return 'geral' // referencia_invalida, so_consulta, …
 }
 
