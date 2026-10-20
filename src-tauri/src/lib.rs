@@ -1,3 +1,5 @@
+﻿#[allow(dead_code)]
+mod armazenamento;
 #[allow(dead_code)]
 mod erro;
 #[allow(dead_code)]
@@ -28,4 +30,5 @@ mod testes {
         assert_eq!(e.codigo, "io");
     }
 }
+
 
