@@ -110,11 +110,13 @@ manutenção · Backup. Botão "+ Lançar" sempre visível (Ctrl+N). Pesquisa po
 - Lista: matrícula, marca/modelo, KM atual, motorista atual, gasto no ano; pesquisa; filtro por
   estado (por omissão só ativos).
 - Ficha: dados do carro, métricas (gasto total, gasto no ano, gasto por categoria) e separadores
-  Histórico (linha do tempo com tudo) · Manutenções · Pneus · Documentos · Motoristas · KM.
+  Histórico (linha do tempo com tudo) · Manutenções · Pneus · Documentos · Multas · Motoristas · KM.
 
 ### 4.3 Lançar (painel que desliza a partir do botão "+")
 
-Tipos: **Manutenção** · **Pneus** · **Documento/taxa** · **Atualizar KM**. Escolhe-se primeiro o
+Tipos: **Manutenção** (feita por: Nós / Oficina; peças + mão de obra ou só o total) · **Pneus** ·
+**Documento/taxa** · **Multa** (condutor, infração, pontos, quem paga, adiantamento, prazos) ·
+**Atualizar KM**. Escolhe-se primeiro o
 carro (pesquisa por matrícula); campos conforme §5. Lançamentos com KM criam uma leitura de KM.
 
 ### 4.4 Motoristas
@@ -132,6 +134,9 @@ nova.
 - Ranking de carros por gasto no período.
 - Gasto por motorista.
 - Tipos de manutenção mais caros.
+- Manutenção: interna vs oficina, peças vs mão de obra, gasto por oficina.
+- Multas: total, parte da empresa, parte dos colaboradores, por reembolsar; por tipo de infração;
+  por motorista (n.º e pontos).
 
 ### 4.6 Planos de manutenção
 
@@ -161,9 +166,10 @@ Valores em cêntimos (inteiro). Datas `AAAA-MM-DD`. Todas as tabelas têm `id`, 
 | `atribuicoes` | carro_id, motorista_id, de, ate (nulo = atual). Sem sobreposição por carro |
 | `leituras_km` | carro_id, data, km, origem (`manual`/`manutencao`/`pneu`), origem_id |
 | `tipos_manutencao` | nome (único), ativo |
-| `manutencoes` | carro_id, data, km, tipo_id, oficina, valor, descricao |
+| `manutencoes` | carro_id, data, km, tipo_id, executada_por (`propria`/`oficina`), oficina (obrigatória se `oficina`), valor (total), valor_pecas, valor_mao_obra (nulos = "só o total"; se preenchidos, valor = peças + mão de obra; em `propria` mão de obra = 0), descricao |
+| `multas` | carro_id, motorista_id (condutor; sugerido pela atribuição na data da infração, editável, pode ser nulo = "por identificar"), data_infracao, data_notificacao, condutor_identificado_em, infracao (`velocidade`/`estacionamento`/`telemovel`/`semaforo`/`cinto`/`documentos`/`portagem`/`outra`), pontos (0–12), valor, vencimento (prazo de pagamento), pago_em, responsavel (`empresa`/`colaborador`/`coparticipado`), valor_empresa, empresa_adiantou (bool), reembolsado_em, descricao |
 | `pneus` | carro_id, data, km, posicao (`FE`/`FD`/`TE`/`TD`/`suplente`/`todos`), marca, modelo, motivo (`troca`/`rodizio`), valor |
-| `documentos` | carro_id, tipo (`IUC`/`inspecao`/`seguro`/`multa`/`outro`), descricao, valor, vencimento, pago_em (nulo = por pagar), data_ocorrencia (só multas), anual (bool), gerado_de_id |
+| `documentos` | carro_id, tipo (`IUC`/`inspecao`/`seguro`/`outro`), descricao, valor, vencimento, pago_em (nulo = por pagar), anual (bool), gerado_de_id |
 | `planos` | tipo_id, cada_km (nulo), cada_meses (nulo; pelo menos um preenchido), todos_carros (bool) |
 | `planos_carros` | plano_id, carro_id (quando não é para todos) |
 | `config` | chave, valor (limiares de alerta, etc.) |
@@ -174,13 +180,29 @@ Valores em cêntimos (inteiro). Datas `AAAA-MM-DD`. Todas as tabelas têm `id`, 
 1. **KM atual** = maior `km` em `leituras_km` do carro (ou `km_inicial` se não houver). Ao lançar
    KM menor do que a leitura anterior mais próxima por data: aviso + confirmação explícita.
 2. **Gasto num período [de, ate]** = Σ `manutencoes.valor` com `data` no período + Σ
-   `pneus.valor` com `data` no período + Σ `documentos.valor` com `pago_em` no período.
-   **Por pagar** = Σ `documentos.valor` com `pago_em` nulo (não entra no gasto).
+   `pneus.valor` com `data` no período + Σ `documentos.valor` com `pago_em` no período + Σ
+   `multas.valor_empresa` com `pago_em` no período (**só a parte da empresa** é gasto da frota).
+   **Por pagar** = Σ `documentos.valor` por pagar + Σ `multas.valor_empresa` por pagar (não entra
+   no gasto).
 3. **Gasto por motorista**: cada despesa é atribuída ao motorista com atribuição ativa no carro na
    data de referência da despesa. Sem atribuição → "Sem motorista". Data de referência:
-   manutenções e pneus → `data`; multas → `data_ocorrencia` (data da infração; obrigatória para
-   multas); restantes documentos → `pago_em` (por pagar não contam). Numa troca de motorista no
-   próprio dia, conta o motorista cuja atribuição começa nesse dia.
+   manutenções e pneus → `data`; documentos → `pago_em` (por pagar não contam). Numa troca de
+   motorista no próprio dia, conta o motorista cuja atribuição começa nesse dia. **Multas** não
+   usam a atribuição: contam para `multas.motorista_id` (o condutor identificado), com a parte da
+   empresa.
+8. **Multas — repartição**: `empresa` → valor_empresa = valor; `colaborador` → valor_empresa = 0;
+   `coparticipado` → valor_empresa escrito pelo utilizador, 0 < valor_empresa < valor (o ecrã
+   mostra a percentagem e a parte do colaborador = valor − valor_empresa).
+   **Reembolso**: se `empresa_adiantou` e a parte do colaborador > 0, essa parte fica "por
+   reembolsar" até `reembolsado_em`. A ficha do motorista mostra: multas (n.º, total), pago pela
+   empresa, pago por ele, **por reembolsar**, e pontos retirados nos últimos 3 anos.
+9. **Prazo para identificar o condutor**: se há `data_notificacao` e `condutor_identificado_em` é
+   nulo, prazo = data_notificacao + 15 dias úteis (excluir sábados, domingos e feriados
+   nacionais de Portugal, incluindo Sexta-feira Santa, Páscoa e Corpo de Deus). Alerta "próximo"
+   a ≤ 5 dias úteis do prazo; "vencido" depois. Multa por pagar com `vencimento`: alerta como os
+   documentos (§6.5).
+10. **Manutenções — relatórios**: gasto interno (`propria`) vs oficina; peças vs mão de obra (as
+    manutenções "só o total" aparecem numa linha "Não discriminado"); gasto por oficina.
 4. **Alertas de manutenção** (por plano × carro ativo):
    - Base = última `manutencoes` desse tipo no carro (km, data); se não houver, `km_inicial` e
      `data_aquisicao` (se não houver data de aquisição, a data de registo do carro).

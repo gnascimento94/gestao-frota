@@ -36,6 +36,7 @@ Vitest + @testing-library/react.
 2. **Valores em euros com vírgula** (`1.234,56`, `45,5`, `45`, `45.5`) → cêntimos exatos (123456, 4550, 4500, 4550); texto inválido mostra erro no campo e não grava. Teste na Tarefa 11.
 3. **Datas impossíveis num lançamento** (data no futuro numa manutenção/pneu/KM, ou anterior à aquisição do carro) → recusado com mensagem; o vencimento de um documento pode ser futuro. Testes na Tarefa 7.
 4. **Pasta do Drive inacessível a meio da sessão** → nada se perde, aparece aviso, a gravação é retomada e o próximo arranque grava primeiro a cópia pendente. Testes nas Tarefas 2 e 8.
+6. **Coparticipação incoerente** (parte da empresa ≥ valor da multa, ou 0) e **total da oficina que não bate com peças + mão de obra** → recusado com mensagem no campo; nunca se grava uma repartição que some mais do que a multa. Testes nas Tarefas 7 e 11.
 5. **Apagar um carro ou motorista com histórico** → não é permitido; o ecrã propõe "Marcar como vendido/inativo". Apagar só é possível sem lançamentos associados. Teste na Tarefa 7.
 
 ---
@@ -105,7 +106,7 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
 - Consumes: `Erro`, `Res`.
 - Produces: `pub const MIGRACOES: &[&str]` (via `include_str!`), `pub fn migrar(conn: &mut Connection) -> Res<()>`, `pub fn migrar_com(conn: &mut Connection, migracoes: &[&str]) -> Res<()>`, `pub fn versao_esquema(conn: &Connection) -> Res<i64>`. Erro com `codigo = "versao_mais_recente"` quando `user_version > migracoes.len()`.
 
-`001_inicial.sql`: tabelas e colunas exatamente como na spec §5 (incluindo `documentos.data_ocorrencia`; sem `abastecimentos`), `criado_em`/`atualizado_em` `TEXT DEFAULT (datetime('now'))`, `UNIQUE(matricula)`, `UNIQUE(tipos_manutencao.nome)`, FKs com `ON DELETE RESTRICT`, CHECKs nos enums (`estado`, `origem`, `posicao`, `motivo`, `tipo`) e `CHECK(cada_km IS NOT NULL OR cada_meses IS NOT NULL)`; índices em `(carro_id, data)` das tabelas de lançamentos; inserir os 11 tipos de manutenção da spec §4.8 e `config` (`limiar_km`=1000, `limiar_dias`=30). `PRAGMA foreign_keys=ON` é ligado em cada abertura (Tarefa 2), não na migração.
+`001_inicial.sql`: tabelas e colunas exatamente como na spec §5 (incluindo `multas` e os campos de `executada_por`/peças/mão de obra em `manutencoes`; sem `abastecimentos`; CHECKs: `valor_empresa BETWEEN 0 AND valor`, `pontos BETWEEN 0 AND 12`, oficina não vazia quando `executada_por='oficina'`), `criado_em`/`atualizado_em` `TEXT DEFAULT (datetime('now'))`, `UNIQUE(matricula)`, `UNIQUE(tipos_manutencao.nome)`, FKs com `ON DELETE RESTRICT`, CHECKs nos enums (`estado`, `origem`, `posicao`, `motivo`, `tipo`) e `CHECK(cada_km IS NOT NULL OR cada_meses IS NOT NULL)`; índices em `(carro_id, data)` das tabelas de lançamentos; inserir os 11 tipos de manutenção da spec §4.8 e `config` (`limiar_km`=1000, `limiar_dias`=30). `PRAGMA foreign_keys=ON` é ligado em cada abertura (Tarefa 2), não na migração.
 
 - [ ] **Step 1: Testes que falham**
 
@@ -225,13 +226,13 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
 **Interfaces:**
 - Produces:
   - `#[derive(Serialize, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)] pub enum Categoria { Manutencao, Pneus, Iuc, Inspecao, Seguro, Multa, Outro }`
-  - `pub struct Despesa { pub carro_id: i64, pub categoria: Categoria, pub valor: i64, pub pago: bool, pub data_ref: Option<NaiveDate>, pub data_motorista: Option<NaiveDate> }` — datas já resolvidas pelo repositório (spec §6.2/§6.3): `data_ref` (para o gasto) = `data` em manutenção/pneu, `pago_em` em documentos; `data_motorista` = `data` em manutenção/pneu, `data_ocorrencia` em multas, `pago_em` nos restantes documentos.
+  - `pub struct Despesa { pub carro_id: i64, pub categoria: Categoria, pub valor: i64, pub pago: bool, pub data_ref: Option<NaiveDate>, pub motorista_fixo: Option<Option<i64>> }` — resolvido pelo repositório (spec §6.2/§6.3): `data_ref` = `data` em manutenção/pneu, `pago_em` em documentos e multas; em multas `valor` = **`valor_empresa`** e `motorista_fixo = Some(multas.motorista_id)` (o condutor, não a atribuição); nos restantes `motorista_fixo = None` → usa `motorista_em(data_ref)`.
   - `pub struct Periodo { pub de: NaiveDate, pub ate: NaiveDate }` (inclusivo)
   - `pub struct Resumo { pub total: i64, pub por_categoria: BTreeMap<Categoria,i64>, pub por_mes: BTreeMap<String /*AAAA-MM*/, BTreeMap<Categoria,i64>>, pub por_carro: Vec<(i64,i64)> /* desc por valor */, pub por_pagar: i64 }`
   - `pub fn resumir(despesas: &[Despesa], p: &Periodo) -> Resumo` — conta só `pago && data_ref ∈ p`; `por_pagar` = soma de `!pago` (independente do período).
   - `pub struct Atribuicao { pub carro_id: i64, pub motorista_id: i64, pub de: NaiveDate, pub ate: Option<NaiveDate> }`
   - `pub fn motorista_em(atribs: &[Atribuicao], carro_id: i64, data: NaiveDate) -> Option<i64>` — atribuições com `de <= data && ate.map_or(true, |a| data <= a)`; se duas (troca no próprio dia), vence a de `de` mais recente.
-  - `pub fn por_motorista(despesas: &[Despesa], atribs: &[Atribuicao], p: &Periodo) -> Vec<(Option<i64>, i64)>` — despesas pagas no período, motorista por `data_motorista`; desc por valor; `None` = "Sem motorista".
+  - `pub fn por_motorista(despesas: &[Despesa], atribs: &[Atribuicao], p: &Periodo) -> Vec<(Option<i64>, i64)>` — despesas pagas no período; motorista = `motorista_fixo` se `Some`, senão `motorista_em(carro, data_ref)`; desc por valor; `None` = "Sem motorista".
 
 - [ ] **Step 1: Testes que falham**
 
@@ -243,7 +244,7 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
 #[test] fn motorista_pela_data_da_despesa()        // A: 01-01..31-03, B: 01-04..None ; despesa 15-03 → A ; 10-04 → B
 #[test] fn troca_no_proprio_dia_conta_o_novo()     // A até 01-04, B desde 01-04 ; despesa 01-04 → B
 #[test] fn sem_atribuicao_e_sem_motorista()
-#[test] fn multa_paga_depois_vai_para_quem_conduzia() // multa data_motorista 10-03 (A), pago_em 20-05 (B a conduzir) → A
+#[test] fn multa_conta_para_o_condutor_e_so_parte_da_empresa() // multa valor_empresa 4_000 (de 12_000), motorista_fixo Some(A), pago_em 20-05 com B atribuído → por_motorista A=4_000; resumir total 4_000
 ```
 
 - [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS.
@@ -270,6 +271,7 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
   - `pub struct DocAlerta { pub id: i64, pub carro_id: i64, pub tipo_nome: String, pub vencimento: NaiveDate }` (só por pagar) ; `pub fn alertas_documentos(docs: &[DocAlerta], hoje: NaiveDate) -> Vec<Alerta>` (≤ 30 dias → Proximo; passado → Vencido).
   - `pub struct CartaAlerta { pub motorista_id: i64, pub nome: String, pub validade: NaiveDate }` ; `pub fn alertas_cartas(c: &[CartaAlerta], hoje: NaiveDate) -> Vec<Alerta>` (≤ 60 dias).
   - `pub fn ordenar(alertas: &mut Vec<Alerta>)` — Vencido antes de Proximo; dentro do nível, menor `falta_dias` (None = +∞) e depois menor `falta_km`.
+  - `TipoAlerta` ganha `IdentificarCondutor` e `Multa`. `pub fn feriados_pt(ano: i32) -> Vec<NaiveDate>` (1 jan, 25 abr, 1 mai, 10 jun, 15 ago, 5 out, 1 nov, 1 dez, 8 dez, 25 dez + Sexta-feira Santa, Páscoa, Corpo de Deus = Páscoa+60; Páscoa pelo algoritmo de Meeus/Butcher). `pub fn somar_dias_uteis(d: NaiveDate, n: u32) -> NaiveDate` (exclui sáb, dom, feriados). `pub fn dias_uteis_entre(a: NaiveDate, b: NaiveDate) -> i64`. `pub struct MultaAlerta { pub id: i64, pub carro_id: i64, pub data_notificacao: Option<NaiveDate>, pub condutor_identificado: bool, pub vencimento: Option<NaiveDate>, pub pago: bool }`; `pub fn alertas_multas(m: &[MultaAlerta], hoje: NaiveDate) -> Vec<Alerta>` — identificar condutor: prazo = `somar_dias_uteis(notificacao, 15)`, Proximo a ≤ 5 dias úteis, Vencido depois (`falta_dias` em dias de calendário, titulo `"Identificar condutor até 05 nov"`); pagamento: mesma regra dos documentos.
   - Em `documentos.rs`: `pub struct NovoDocumento { pub carro_id: i64, pub tipo: String, pub descricao: String, pub valor: i64, pub vencimento: NaiveDate, pub anual: bool, pub gerado_de_id: i64 }` ; `pub fn proximo_anual(id: i64, carro_id: i64, tipo: &str, descricao: &str, valor: i64, vencimento: NaiveDate) -> NovoDocumento` (vencimento + 12 meses; 29-02 → 28-02).
 
 - [ ] **Step 1: Testes que falham**
@@ -287,6 +289,9 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
 #[test] fn ordenacao_vencidos_primeiro()
 #[test] fn anual_gera_ano_seguinte()                      // IUC venc 2026-05-31 → 2027-05-31, gerado_de_id
 #[test] fn anual_29_fevereiro()                           // 2028-02-29 → 2029-02-28
+#[test] fn pascoa_e_feriados_moveis()                     // Páscoa 2026-04-05, Sexta-feira Santa 2026-04-03, Corpo de Deus 2026-06-04; Páscoa 2027-03-28
+#[test] fn quinze_dias_uteis_saltam_fins_de_semana_e_feriados() // somar_dias_uteis(2026-11-27 (sex), 15) → 2026-12-21 (salta 1 e 8 dez)
+#[test] fn identificar_condutor_proximo_e_vencido()      // notificação 2026-10-01; hoje 2026-10-20 → Proximo; condutor identificado → nada; hoje 2026-10-23 → Vencido
 ```
 
 - [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS.
@@ -305,10 +310,10 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
 - Produces — structs `serde(rename_all="camelCase")`, `Deserialize` para `*Input`, `Serialize` para saídas; todas as funções recebem `conn: &Connection` (ou `&mut` quando transação) e `hoje: NaiveDate` onde valida datas:
   - `carros.rs`: `Carro { id, matricula, marca, modelo, ano: Option<i32>, cor, km_inicial, km_atual, data_aquisicao: Option<String>, estado, data_saida: Option<String>, notas, motorista_atual: Option<(i64,String)>, gasto_ano: i64 }`; `CarroInput { id: Option<i64>, matricula, marca, modelo, ano, cor, km_inicial, data_aquisicao, estado, data_saida, notas }`; `listar_carros(conn, so_ativos: bool, ano: i32) -> Res<Vec<Carro>>`; `obter_carro(conn, id, ano) -> Res<Carro>`; `guardar_carro(conn, &CarroInput) -> Res<i64>` (normaliza matrícula; duplicada → `codigo:"matricula_duplicada"`, mensagem `"Já existe um carro com a matrícula AA-12-BB."`); `apagar_carro(conn, id) -> Res<()>` (com lançamentos/atribuições → `codigo:"tem_historico"`, mensagem `"Este carro tem histórico. Marque-o como vendido ou inativo."`).
   - `motoristas.rs`: `Motorista { id, nome, telefone, carta_numero, carta_validade: Option<String>, ativo, notas }`, `MotoristaInput`, `listar_motoristas(conn, so_ativos) `, `guardar_motorista`, `apagar_motorista` (mesma regra `tem_historico`); `atribuir(conn: &mut, carro_id, motorista_id: Option<i64>, data: NaiveDate) -> Res<()>` — fecha a atribuição aberta do carro com `ate = data` e, se `Some`, abre nova com `de = data`; um motorista só tem uma atribuição aberta (fecha a anterior noutro carro); `atribuicoes_de(conn, Filtro) -> Res<Vec<Atribuicao>>`.
-  - `lancamentos.rs`: `ManutencaoInput { carro_id, data, km, tipo_id, oficina, valor, descricao }`, `PneuInput { carro_id, data, km, posicao, marca, modelo, motivo, valor }`, `DocumentoInput { carro_id, tipo, descricao, valor, vencimento, pago_em: Option, data_ocorrencia: Option, anual }`, `KmInput { carro_id, data, km, confirmado: bool }`; `lancar_manutencao(conn:&mut, &ManutencaoInput, hoje) -> Res<i64>`, `lancar_pneu`, `lancar_documento`, `atualizar_km` — cada um em transação; manutenção/pneu/KM criam `leituras_km` (origem e origem_id); validações: data > hoje → `"data_futura"`; data < data_aquisicao → `"data_antes_aquisicao"`; km abaixo e `!confirmado` → `Erro{codigo:"km_abaixo", mensagem:"O último KM registado era 70 000. Confirma 69 000?"}` (manutenção/pneu também levam `confirmado: bool`); valor < 0 → `"valor_invalido"`; multa sem `data_ocorrencia` → `"falta_data_infracao"`. `pagar_documento(conn:&mut, id, pago_em) -> Res<Option<i64>>` (se `anual`, insere `proximo_anual` e devolve o id). `apagar_lancamento(conn:&mut, tipo: &str /* "manutencao"|"pneu"|"documento"|"km" */, id) -> Res<()>` (apaga também a leitura associada). `HistoricoItem { tipo, id, data, km: Option<i64>, titulo, valor: Option<i64>, detalhe }`; `historico(conn, carro_id: Option<i64>, limite: i64) -> Res<Vec<HistoricoItem>>` (desc por data).
+  - `lancamentos.rs`: `ManutencaoInput { carro_id, data, km, tipo_id, executada_por, oficina: Option<String>, valor: i64, valor_pecas: Option<i64>, valor_mao_obra: Option<i64>, descricao, confirmado }` (validação: `oficina` obrigatória em `oficina` → `"falta_oficina"`; se peças/mão de obra preenchidas, `valor` tem de ser a soma → `"valor_nao_bate"`; em `propria`, mão de obra tem de ser 0/nula); `oficinas_usadas(conn) -> Res<Vec<String>>` (distintas, mais usadas primeiro); `PneuInput { carro_id, data, km, posicao, marca, modelo, motivo, valor }`, `DocumentoInput { carro_id, tipo, descricao, valor, vencimento, pago_em: Option, data_ocorrencia: Option, anual }`, `KmInput { carro_id, data, km, confirmado: bool }`; `lancar_manutencao(conn:&mut, &ManutencaoInput, hoje) -> Res<i64>`, `lancar_pneu`, `lancar_documento`, `atualizar_km` — cada um em transação; manutenção/pneu/KM criam `leituras_km` (origem e origem_id); validações: data > hoje → `"data_futura"`; data < data_aquisicao → `"data_antes_aquisicao"`; km abaixo e `!confirmado` → `Erro{codigo:"km_abaixo", mensagem:"O último KM registado era 70 000. Confirma 69 000?"}` (manutenção/pneu também levam `confirmado: bool`); valor < 0 → `"valor_invalido"`. `MultaInput { id: Option<i64>, carro_id, motorista_id: Option<i64>, data_infracao, data_notificacao: Option, condutor_identificado_em: Option, infracao, pontos, valor, vencimento: Option, pago_em: Option, responsavel, valor_empresa: Option<i64>, empresa_adiantou, reembolsado_em: Option, descricao }`; `guardar_multa(conn:&mut, &MultaInput, hoje) -> Res<i64>` — `valor_empresa` calculado para `empresa`/`colaborador`; em `coparticipado` obrigatório e `0 < valor_empresa < valor` → senão `"coparticipacao_invalida"` ("A parte da empresa tem de ser maior que 0 e menor que o valor da multa."); `data_infracao` futura → `"data_futura"`; `condutor_sugerido(conn, carro_id, data) -> Res<Option<i64>>` (via `motorista_em`); `marcar_reembolsado(conn, id, data)`; `identificar_condutor(conn, id, motorista_id, data)`. `ResumoMultasMotorista { n: i64, total: i64, empresa: i64, colaborador: i64, por_reembolsar: i64, pontos_3_anos: i64 }`; `multas_motorista(conn, motorista_id, hoje) -> Res<ResumoMultasMotorista>`. `pagar_documento(conn:&mut, id, pago_em) -> Res<Option<i64>>` (se `anual`, insere `proximo_anual` e devolve o id). `apagar_lancamento(conn:&mut, tipo: &str /* "manutencao"|"pneu"|"documento"|"km" */, id) -> Res<()>` (apaga também a leitura associada). `HistoricoItem { tipo, id, data, km: Option<i64>, titulo, valor: Option<i64>, detalhe }`; `historico(conn, carro_id: Option<i64>, limite: i64) -> Res<Vec<HistoricoItem>>` (desc por data).
   - `planos.rs`: `TipoManutencao { id, nome, ativo }`, `listar_tipos`, `guardar_tipo(conn, id: Option<i64>, nome) `; `Plano { id, tipo_id, tipo_nome, cada_km, cada_meses, todos_carros, carros: Vec<i64> }`, `PlanoInput`, `listar_planos`, `guardar_plano`, `apagar_plano`.
   - `config.rs`: `obter_limiares(conn) -> Res<Limiares>`, `guardar_limiares(conn, &Limiares)`.
-  - `consultas.rs`: `despesas(conn, carro_ids: Option<&[i64]>) -> Res<Vec<Despesa>>`; `Painel { gasto_mes, gasto_ano, por_pagar, carros_ativos, alertas: Vec<Alerta>, recentes: Vec<HistoricoItem> }`, `painel(conn, hoje) -> Res<Painel>`; `FiltroRelatorio { de, ate, carro_ids: Option<Vec<i64>>, motorista_id: Option<i64> }`, `Relatorio { resumo: Resumo, por_motorista: Vec<(Option<i64>, String, i64)>, por_tipo_manutencao: Vec<(String,i64)> }`, `relatorio(conn, &FiltroRelatorio) -> Res<Relatorio>` (com `motorista_id`, só despesas cujo `motorista_em` é esse motorista); `alertas(conn, hoje) -> Res<Vec<Alerta>>` (monta os inputs da Tarefa 6, só carros ativos e motoristas ativos, chama `ordenar`).
+  - `consultas.rs`: `despesas(conn, carro_ids: Option<&[i64]>) -> Res<Vec<Despesa>>`; `Painel { gasto_mes, gasto_ano, por_pagar, carros_ativos, alertas: Vec<Alerta>, recentes: Vec<HistoricoItem> }`, `painel(conn, hoje) -> Res<Painel>`; `FiltroRelatorio { de, ate, carro_ids: Option<Vec<i64>>, motorista_id: Option<i64> }`, `Relatorio { resumo: Resumo, por_motorista: Vec<(Option<i64>, String, i64)>, por_tipo_manutencao: Vec<(String,i64)>, manutencao: { interna: i64, oficina: i64, pecas: i64, mao_obra: i64, nao_discriminado: i64, por_oficina: Vec<(String,i64)> }, multas: { n: i64, total: i64, empresa: i64, colaboradores: i64, por_reembolsar: i64, por_infracao: Vec<(String,i64,i64) /* infração, n, total */>, por_motorista: Vec<(Option<i64>,String,i64 /*n*/,i64 /*pontos*/)> } }` (structs nomeados `RelManutencao`, `RelMultas`), `relatorio(conn, &FiltroRelatorio) -> Res<Relatorio>` (com `motorista_id`, só despesas cujo `motorista_em` é esse motorista); `alertas(conn, hoje) -> Res<Vec<Alerta>>` (monta os inputs da Tarefa 6 — manutenções, documentos, cartas e multas —, só carros ativos e motoristas ativos, chama `ordenar`).
 
 - [ ] **Step 1: Testes que falham** (banco em memória migrado; `hoje = 2026-10-20`)
 
@@ -319,7 +324,12 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
 #[test] fn km_abaixo_pede_confirmacao()                  // leitura 70_000; km 69_000 confirmado=false → Err "km_abaixo" mensagem contém "70 000"; confirmado=true → Ok
 #[test] fn data_futura_recusada_mas_vencimento_futuro_ok()
 #[test] fn data_antes_da_aquisicao_recusada()
-#[test] fn multa_exige_data_da_infracao()
+#[test] fn coparticipacao_fora_dos_limites_recusada()   // valor 12_000: valor_empresa 0, 12_000 e None → Err "coparticipacao_invalida"; 4_000 → Ok
+#[test] fn multa_colaborador_nao_conta_no_gasto_da_frota() // relatorio total exclui; multas.colaboradores inclui
+#[test] fn adiantamento_fica_por_reembolsar_ate_marcar()  // empresa_adiantou, coparticipado 4_000/12_000 → por_reembolsar 8_000; marcar_reembolsado → 0
+#[test] fn condutor_sugerido_pela_atribuicao()
+#[test] fn pontos_so_dos_ultimos_3_anos()
+#[test] fn oficina_obrigatoria_e_soma_pecas_mao_de_obra()  // oficina sem nome → "falta_oficina"; pecas 5_000 + mão 3_000 com valor 9_000 → "valor_nao_bate"
 #[test] fn pagar_iuc_anual_cria_o_seguinte()
 #[test] fn apagar_manutencao_remove_a_leitura()
 #[test] fn atribuir_fecha_a_anterior()                   // A em carro1 desde 01-01; atribuir B 01-04 → A.ate == 01-04; B aberto
@@ -343,7 +353,7 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml` → PASS (0 testes ok); `
 - Consumes: tudo das Tarefas 1–7.
 - Produces:
   - `estado.rs`: `pub enum Arranque { Ok, Bloqueado { pc: String }, Corrompido, VersaoMaisRecente, SemPasta { mensagem: String } }` (serde tag `"estado"`); `pub struct Estado { conn: Mutex<Option<Connection>>, caminhos: Caminhos, lock: Mutex<Option<Lock>>, so_consulta: AtomicBool, ultima_gravacao: Mutex<Option<NaiveDateTime>>, erro_gravacao: Mutex<Option<String>>, sujo: AtomicBool }`; `Estado::arrancar(raiz, local, pc, agora) -> (Estado, Arranque)`; `Estado::abrir_consulta(&self)` (abre `banco` read-only, `so_consulta=true`); `Estado::alterado(&self)` (marca `sujo`); `Estado::tick(&self, agora)` (chamado por uma thread a cada 1 s: grava se `sujo` e passaram ≥ 2 s desde a última alteração; se `erro_gravacao`, tenta de novo a cada 60 s; renova o lock a cada 30 s); `Estado::fechar(&self, hoje)` (grava, `copia_diaria`, liberta lock); `pub fn mutar<T>(&self, f: impl FnOnce(&mut Connection) -> Res<T>) -> Res<T>` (recusa com `codigo:"so_consulta"` em modo consulta; chama `alterado`).
-  - `comandos.rs` (`#[tauri::command]`, todos devolvem `Result<T, Erro>`): `arranque`, `abrir_consulta`, `estado_armazenamento -> EstadoArmazenamento { pasta, no_google_drive: bool, ultima_gravacao, erro: Option<String>, so_consulta, versao_app }`, `fazer_copia`, `listar_versoes`, `restaurar_versao(nome)`, `carros_listar(soAtivos, ano)`, `carro_obter(id, ano)`, `carro_guardar(input)`, `carro_apagar(id)`, `motoristas_listar(soAtivos)`, `motorista_guardar`, `motorista_apagar`, `atribuir(carroId, motoristaId, data)`, `lancar_manutencao`, `lancar_pneu`, `lancar_documento`, `atualizar_km`, `pagar_documento(id, pagoEm)`, `apagar_lancamento(tipo, id)`, `historico(carroId, limite)`, `tipos_listar`, `tipo_guardar`, `planos_listar`, `plano_guardar`, `plano_apagar`, `limiares_obter`, `limiares_guardar`, `painel`, `relatorio(filtro)`. `no_google_drive` = caminho contém `\Meu Disco\`, `\O meu disco\`, `\My Drive\` ou `\Google Drive\` (sem distinção de maiúsculas).
+  - `comandos.rs` (`#[tauri::command]`, todos devolvem `Result<T, Erro>`): `arranque`, `abrir_consulta`, `estado_armazenamento -> EstadoArmazenamento { pasta, no_google_drive: bool, ultima_gravacao, erro: Option<String>, so_consulta, versao_app }`, `fazer_copia`, `listar_versoes`, `restaurar_versao(nome)`, `carros_listar(soAtivos, ano)`, `carro_obter(id, ano)`, `carro_guardar(input)`, `carro_apagar(id)`, `motoristas_listar(soAtivos)`, `motorista_guardar`, `motorista_apagar`, `atribuir(carroId, motoristaId, data)`, `lancar_manutencao`, `lancar_pneu`, `lancar_documento`, `guardar_multa`, `condutor_sugerido(carroId, data)`, `marcar_reembolsado(id, data)`, `identificar_condutor(id, motoristaId, data)`, `multas_motorista(motoristaId)`, `oficinas_usadas`, `atualizar_km`, `pagar_documento(id, pagoEm)`, `apagar_lancamento(tipo, id)`, `historico(carroId, limite)`, `tipos_listar`, `tipo_guardar`, `planos_listar`, `plano_guardar`, `plano_apagar`, `limiares_obter`, `limiares_guardar`, `painel`, `relatorio(filtro)`. `no_google_drive` = caminho contém `\Meu Disco\`, `\O meu disco\`, `\My Drive\` ou `\Google Drive\` (sem distinção de maiúsculas).
   - `lib.rs`: raiz = `FROTA_RAIZ` ou pasta do exe; local = `%LOCALAPPDATA%\Frota`; pc = `COMPUTERNAME`; `Estado::arrancar` no `setup`; thread de `tick`; no evento `CloseRequested` → `fechar` (síncrono) antes de sair.
   - `src/api/tipos.ts`: interfaces TS com os mesmos nomes e campos (camelCase) dos structs serializados; `src/api/comandos.ts`: uma função tipada por comando (`carrosListar(soAtivos: boolean, ano: number): Promise<Carro[]>`, …) e `type ErroApi = { codigo: string; mensagem: string }`.
 
@@ -403,7 +413,8 @@ test("sem desfazer a ação corre aos 8 s", ...)
 - Produces: ecrãs conforme spec §4.2, §4.4, §4.8.
   - Carros: lista (matrícula, marca/modelo, KM, motorista, gasto no ano), pesquisa (filtra por matrícula normalizada sem hífens e por modelo), alternar "Mostrar inativos/vendidos"; botão "Novo carro" abre formulário na `Folha`.
   - Ficha: cabeçalho com matrícula grande, métricas (gasto total, ano, por categoria), separadores Histórico · Manutenções · Pneus · Documentos (com botão "Marcar como pago") · Motoristas (atribuir/trocar) · KM; editar dados; "Apagar" → se `tem_historico`, mostra a mensagem e botão "Marcar como vendido".
-  - Motoristas: lista, ficha com carros atribuídos e gasto no ano (via `relatorio` com `motoristaId`), validade da carta com alerta visual.
+  - Motoristas: lista, ficha com carros atribuídos e gasto no ano (via `relatorio` com `motoristaId`), validade da carta com alerta visual, bloco Multas (`multasMotorista`: n.º, total, pago pela empresa, pago por ele, **por reembolsar** com botão "Marcar reembolsado" por multa, pontos nos últimos 3 anos).
+  - Ficha do carro: separador Multas (lista com estado: por identificar condutor / por pagar / por reembolsar / fechada).
   - BoasVindas: aparece quando `carrosListar(false, ano)` está vazio; texto "Vamos registar o primeiro carro" + formulário.
   - Erros de validação do núcleo (`ErroApi.mensagem`) aparecem junto ao campo respetivo (mapa `codigo → campo`: `matricula_*`→matrícula, `data_*`→data, `km_abaixo`→km com botão "Confirmar", `valor_invalido`→valor).
 
@@ -424,12 +435,15 @@ test("lista vazia mostra boas-vindas")
 ### Task 11: Lançar
 
 **Files:**
-- Create: `src/lancar/Lancar.tsx`, `FormManutencao.tsx`, `FormPneu.tsx`, `FormDocumento.tsx`, `FormKm.tsx`
+- Create: `src/lancar/Lancar.tsx`, `FormManutencao.tsx`, `FormPneu.tsx`, `FormDocumento.tsx`, `FormMulta.tsx`, `FormKm.tsx`
 - Test: `src/lancar/Lancar.test.tsx`
 
 **Interfaces:**
 - Consumes: `Folha`, `parseEuros`, `comandos`.
-- Produces: `<Lancar aberta origem carroId? onFechar onLancado/>`. Passo 1: escolher tipo (Manutenção · Pneus · Documento/taxa · Atualizar KM) e carro (pesquisa por matrícula; pré-selecionado se aberto a partir da ficha). Passo 2: formulário do tipo com campos da spec §5; data por omissão = hoje; KM sugerido = KM atual; Documento: tipo IUC/Inspeção/Seguro/Multa/Outro, "Anual" ligado por omissão para IUC e Seguro, campo "Data da infração" só para Multa e obrigatório. Validação ao escrever (valor via `parseEuros`, KM inteiro ≥ 0); `km_abaixo` mostra a mensagem do núcleo e um botão "Confirmar" que reenvia com `confirmado: true`. Após sucesso: fecha, toast "Lançado ✓", chama `onLancado`.
+- Produces: `<Lancar aberta origem carroId? onFechar onLancado/>`. Passo 1: escolher tipo (Manutenção · Pneus · Documento/taxa · Multa · Atualizar KM) e carro (pesquisa por matrícula; pré-selecionado se aberto a partir da ficha). Passo 2: formulário do tipo com campos da spec §5; data por omissão = hoje; KM sugerido = KM atual.
+  - Manutenção: "Feita por" segmentado **Nós / Oficina** (omissão: Nós). Nós → campo "Peças e materiais (€)". Oficina → nome com sugestões (`oficinasUsadas`), "Peças (€)" + "Mão de obra (€)" com total calculado à vista, e interruptor "Só tenho o total" que troca para um único campo.
+  - Documento: tipo IUC/Inspeção/Seguro/Outro, "Anual" ligado por omissão para IUC e Seguro.
+  - Multa: data da infração (obrigatória) → condutor pré-preenchido com `condutorSugerido` (editável, ou "Por identificar"); infração (lista), pontos (0–12); valor; prazo de pagamento; data de notificação e "Condutor já identificado em"; **Quem paga** segmentado Empresa / Colaborador / Coparticipado — em Coparticipado, campo "Parte da empresa (€)" com linha ao vivo `"Empresa 40,00 € (33%) · Colaborador 80,00 €"`; interruptor "A empresa adiantou o pagamento" (visível quando a parte do colaborador > 0). Validação ao escrever (valor via `parseEuros`, KM inteiro ≥ 0); `km_abaixo` mostra a mensagem do núcleo e um botão "Confirmar" que reenvia com `confirmado: true`. Após sucesso: fecha, toast "Lançado ✓", chama `onLancado`.
 
 - [ ] **Step 1: Testes que falham**
 
@@ -437,6 +451,10 @@ test("lista vazia mostra boas-vindas")
 test("valor '1.234,56' envia 123456 cêntimos")
 test("valor inválido mostra erro e não envia")
 test("multa exige data da infração")
+test("multa pré-preenche o condutor sugerido para a data da infração")
+test("coparticipado 120 € com empresa 40 € mostra 33% e colaborador 80,00 €")
+test("manutenção na oficina sem nome mostra erro; 'Nós' esconde mão de obra")
+test("peças 50 + mão de obra 30 envia valor 8000")
 test("km abaixo pede confirmação e reenvia com confirmado=true")
 test("IUC vem marcado como anual")
 ```
@@ -456,7 +474,7 @@ test("IUC vem marcado como anual")
 - Consumes: `painel()`, `relatorio(filtro)`, `Alerta`, `Resumo`.
 - Produces:
   - Início: 4 cartões (Gasto este mês, Gasto no ano, Por pagar, Carros ativos), lista "Próximos vencimentos" (vermelho = Vencido, laranja = Proximo; texto: manutenção `"AA-12-BB · Mudança de óleo · faltam 420 km"` / `"passou 200 km"` / `"faltam 5 dias"`; documento `"AA-12-BB · IUC · vence a 31 mai"`; carta `"João Silva · carta caduca a 12 dez"`), clicar abre a ficha (carro ou motorista); "Últimos lançamentos" (10).
-  - Relatórios: seletor de período (Este mês · Mês anterior · Este ano · Ano anterior · Personalizado), filtros carro(s) e motorista; total grande; barras por categoria; `Grafico` de barras empilhadas mensais; ranking de carros; gasto por motorista; tipos de manutenção mais caros.
+  - Relatórios: seletor de período (Este mês · Mês anterior · Este ano · Ano anterior · Personalizado), filtros carro(s) e motorista; total grande; barras por categoria; `Grafico` de barras empilhadas mensais; ranking de carros; gasto por motorista; tipos de manutenção mais caros; bloco Manutenção (interna vs oficina, peças vs mão de obra vs não discriminado, por oficina); bloco Multas (total, empresa, colaboradores, por reembolsar, por infração, por motorista com pontos). Início mostra alertas "Identificar condutor até …" e multas por pagar.
   - `Grafico.tsx`: `props { meses: { mes: string; valores: Partial<Record<Categoria, number>> }[]; cores: Record<Categoria,string> }` — SVG próprio, eixo Y com 4 marcas arredondadas (1, 2, 5 × 10ⁿ), legenda, tooltip ao passar; meses sem gasto aparecem com barra vazia.
 
 - [ ] **Step 1: Testes que falham**
