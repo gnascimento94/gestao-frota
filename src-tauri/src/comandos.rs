@@ -113,11 +113,11 @@ pub fn aplicar_atualizacao(app: tauri::AppHandle, e: E<'_>) -> Res<()> {
     }
     let exe = std::env::current_exe()?;
     let (l, novo) = atualizacao::preparar(&exe, env!("CARGO_PKG_VERSION"))?;
-    let r = e
-        .gravar_antes_de_atualizar(&l.versao, agora())
-        .and_then(|()| atualizacao::trocar_exe(&exe, &novo));
-    if let Err(err) = r {
-        let _ = std::fs::remove_file(&novo);
+    // Grava, faz a cópia antes da versão e troca os executáveis; em falha apaga
+    // `Frota.new.exe` (salvo troca a meio, em que a mensagem diz onde estão).
+    if let Err(err) =
+        atualizacao::instalar(&exe, &novo, || e.gravar_antes_de_atualizar(&l.versao, agora()))
+    {
         log::warn!("atualização abortada: {}", err.mensagem);
         return Err(err);
     }

@@ -79,8 +79,10 @@ pub fn run() {
             app.manage(estado);
             // Depois de uma atualização: apagar `Frota.old.exe`. O processo antigo
             // pode ainda estar a terminar (ficheiro em uso), por isso tenta-se
-            // algumas vezes em segundo plano.
-            if let Ok(exe) = std::env::current_exe() {
+            // algumas vezes em segundo plano. Só com o `frota.lock` (arranque ok):
+            // em consulta, outro PC pode estar a meio de uma atualização nesta pasta.
+            let com_lock = arranque == estado::Arranque::Ok;
+            if com_lock && let Ok(exe) = std::env::current_exe() {
                 // Já, antes de qualquer descarga (também apaga um `Frota.new.exe` esquecido).
                 atualizacao::limpar_old(&exe);
                 let old = exe.with_file_name(atualizacao::NOME_OLD);

@@ -104,7 +104,8 @@ pub fn validar(bytes: &[u8], l: &Latest, chave_publica: &str) -> Res<()> {
     let sig = texto_b64(&l.assinatura)
         .and_then(|t| Signature::decode(&t).ok())
         .ok_or_else(invalida)?;
-    pk.verify(bytes, &sig, true).map_err(|_| invalida())?;
+    // O tauri assina sempre com prehash ("ED"): assinaturas legadas são recusadas.
+    pk.verify(bytes, &sig, false).map_err(|_| invalida())?;
     // Impede que um binário antigo (assinado) seja anunciado como versão nova.
     if versao_assinada(&sig) != Some(l.versao.trim()) {
         return Err(invalida());
@@ -115,24 +116,70 @@ pub fn validar(bytes: &[u8], l: &Latest, chave_publica: &str) -> Res<()> {
 /// `exe` → `Frota.old.exe` (apaga o `.old` anterior), `novo` → `exe`. Se o
 /// segundo rename falhar, desfaz o primeiro. O Windows deixa renomear o
 /// executável em uso.
+///
+/// Se também o desfazer falhar, já não há `exe`: devolve `troca_incompleta`
+/// com os caminhos do executável antigo e do novo (que NÃO devem ser apagados).
+/// (A app usa `instalar`, que faz a mesma troca depois de gravar.)
+#[allow(dead_code)]
 pub fn trocar_exe(exe: &Path, novo: &Path) -> Res<()> {
+    trocar_com(exe, novo, |a: &Path, b: &Path| std::fs::rename(a, b))
+}
+
+fn trocar_com(
+    exe: &Path,
+    novo: &Path,
+    renomear: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Res<()> {
     let old = exe.with_file_name(NOME_OLD);
     match std::fs::remove_file(&old) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.into()),
     }
-    std::fs::rename(exe, &old)?;
-    if let Err(e) = std::fs::rename(novo, exe) {
-        if let Err(e2) = std::fs::rename(&old, exe) {
+    renomear(exe, &old)?;
+    if let Err(e) = renomear(novo, exe) {
+        if let Err(e2) = renomear(&old, exe) {
             log::error!("atualização: não foi possível repor o executável: {e2}");
+            return Err(erro(
+                "troca_incompleta",
+                format!(
+                    "A atualização ficou a meio: o programa atual está em «{}» e a versão nova em «{}». Renomeie um deles para «{}» para voltar a abrir o programa.",
+                    old.display(),
+                    novo.display(),
+                    exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                ),
+            ));
         }
         return Err(e.into());
     }
     Ok(())
 }
 
-/// Apaga `Frota.old.exe` (e um `Frota.new.exe` esquecido). Ignora erros.
+/// Depois de validado o `novo`: `gravar` (dados + cópia antes da versão) e
+/// troca dos executáveis. Em qualquer falha apaga `novo`, exceto se a troca
+/// ficou a meio (`troca_incompleta`: é o único executável novo que existe).
+pub fn instalar(exe: &Path, novo: &Path, gravar: impl FnOnce() -> Res<()>) -> Res<()> {
+    instalar_com(exe, novo, gravar, |a: &Path, b: &Path| std::fs::rename(a, b))
+}
+
+fn instalar_com(
+    exe: &Path,
+    novo: &Path,
+    gravar: impl FnOnce() -> Res<()>,
+    renomear: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Res<()> {
+    let r = gravar().and_then(|()| trocar_com(exe, novo, renomear));
+    if let Err(e) = &r
+        && e.codigo != "troca_incompleta"
+    {
+        let _ = std::fs::remove_file(novo);
+    }
+    r
+}
+
+/// Apaga `Frota.old.exe` e um `Frota.new.exe` esquecido. Ignora erros.
+/// Só deve ser chamado por quem tem o `frota.lock` (pode haver outra instância
+/// noutro PC a meio de uma atualização na mesma pasta).
 pub fn limpar_old(exe: &Path) {
     let _ = std::fs::remove_file(exe.with_file_name(NOME_OLD));
     let _ = std::fs::remove_file(exe.with_file_name(NOME_NOVO));
@@ -191,17 +238,20 @@ pub fn preparar(exe: &Path, atual: &str) -> Res<(Latest, PathBuf)> {
         .or_else(|| verificar(atual))
         .ok_or_else(|| erro("sem_atualizacao", "Não foi possível obter a nova versão."))?;
     let novo = exe.with_file_name(NOME_NOVO);
-    let r = descarregar(&l.url).and_then(|bytes| {
-        std::fs::write(&novo, &bytes)?;
-        validar(&bytes, &l, CHAVE_PUBLICA)
-    });
-    match r {
-        Ok(()) => Ok((l, novo)),
-        Err(e) => {
-            let _ = std::fs::remove_file(&novo);
-            Err(e)
-        }
+    let bytes = descarregar(&l.url)?;
+    guardar_e_validar(&novo, &bytes, &l, CHAVE_PUBLICA)?;
+    Ok((l, novo))
+}
+
+/// Escreve `bytes` em `novo` e valida-os; em falha apaga `novo`.
+fn guardar_e_validar(novo: &Path, bytes: &[u8], l: &Latest, chave_publica: &str) -> Res<()> {
+    let r = std::fs::write(novo, bytes)
+        .map_err(Erro::from)
+        .and_then(|()| validar(bytes, l, chave_publica));
+    if r.is_err() {
+        let _ = std::fs::remove_file(novo);
     }
+    r
 }
 
 #[cfg(test)]
@@ -315,6 +365,87 @@ mod testes {
         assert!(trocar_exe(&exe, &novo).is_err());
         assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v1");
         assert!(!t.path().join("Frota.old.exe").exists());
+    }
+
+    #[test]
+    fn troca_com_dupla_falha_mantem_o_novo_e_diz_onde_esta_o_exe() {
+        let t = tempfile::tempdir().unwrap();
+        let exe = t.path().join("Frota.exe");
+        let novo = t.path().join("Frota.new.exe");
+        let old = t.path().join("Frota.old.exe");
+        std::fs::write(&exe, "v1").unwrap();
+        std::fs::write(&novo, "v2").unwrap();
+        // 1.º rename (exe → old) funciona; o 2.º (novo → exe) e o desfazer (old → exe) falham
+        let chamada = std::cell::Cell::new(0);
+        let renomear = |de: &Path, para: &Path| {
+            chamada.set(chamada.get() + 1);
+            if chamada.get() == 1 {
+                std::fs::rename(de, para)
+            } else {
+                Err(std::io::Error::other("simulado"))
+            }
+        };
+        let gravou = std::cell::Cell::new(false);
+        let e = instalar_com(&exe, &novo, || { gravou.set(true); Ok(()) }, renomear).unwrap_err();
+        assert!(gravou.get());
+        assert_eq!(chamada.get(), 3);
+        assert_eq!(e.codigo, "troca_incompleta");
+        assert!(e.mensagem.contains(&old.display().to_string()), "{}", e.mensagem);
+        assert!(e.mensagem.contains(&novo.display().to_string()), "{}", e.mensagem);
+        // nenhum executável é apagado
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), "v1");
+        assert_eq!(std::fs::read_to_string(&novo).unwrap(), "v2");
+    }
+
+    #[test]
+    fn instalar_com_gravacao_falhada_apaga_o_novo_e_nao_troca() {
+        let t = tempfile::tempdir().unwrap();
+        let exe = t.path().join("Frota.exe");
+        let novo = t.path().join("Frota.new.exe");
+        std::fs::write(&exe, "v1").unwrap();
+        std::fs::write(&novo, "v2").unwrap();
+        let conflito = || Err(erro("conflito", "outro PC"));
+        let e = instalar_com(&exe, &novo, conflito, |a: &Path, b: &Path| std::fs::rename(a, b)).unwrap_err();
+        assert_eq!(e.codigo, "conflito");
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v1");
+        assert!(!novo.exists());
+        assert!(!t.path().join("Frota.old.exe").exists());
+    }
+
+    #[test]
+    fn instalar_troca_falhada_e_reposta_apaga_o_novo() {
+        let t = tempfile::tempdir().unwrap();
+        let exe = t.path().join("Frota.exe");
+        let novo = t.path().join("Frota.new.exe");
+        std::fs::write(&exe, "v1").unwrap();
+        std::fs::write(&novo, "v2").unwrap();
+        let chamada = std::cell::Cell::new(0);
+        let renomear = |de: &Path, para: &Path| {
+            chamada.set(chamada.get() + 1);
+            if chamada.get() == 2 { Err(std::io::Error::other("simulado")) } else { std::fs::rename(de, para) }
+        };
+        let e = instalar_com(&exe, &novo, || Ok(()), renomear).unwrap_err();
+        assert_ne!(e.codigo, "troca_incompleta");
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v1");
+        assert!(!novo.exists());
+    }
+
+    #[test]
+    fn guardar_novo_invalido_apaga_o_ficheiro() {
+        let t = tempfile::tempdir().unwrap();
+        let novo = t.path().join("Frota.new.exe");
+        let mut l = latest_valido();
+        l.sha256 = "00".into();
+        let e = guardar_e_validar(&novo, CONTEUDO, &l, CHAVE_TESTE).unwrap_err();
+        assert_eq!(e.codigo, "atualizacao_invalida");
+        assert!(!novo.exists());
+        // de outra chave também
+        let e = guardar_e_validar(&novo, CONTEUDO, &latest_valido(), OUTRA_CHAVE_TESTE).unwrap_err();
+        assert_eq!(e.codigo, "atualizacao_invalida");
+        assert!(!novo.exists());
+        // válido: fica
+        guardar_e_validar(&novo, CONTEUDO, &latest_valido(), CHAVE_TESTE).unwrap();
+        assert_eq!(std::fs::read(&novo).unwrap(), CONTEUDO);
     }
 
     #[test]

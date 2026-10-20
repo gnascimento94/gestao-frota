@@ -1,6 +1,12 @@
 # Publica uma versão: em cada tag vX.Y.Z compila o Frota.exe, assina-o e cria a
 # Release com Frota.exe + latest.json (lido pela atualização automática da app).
 #
+# Três jobs, cada um com o mínimo de permissões:
+#   compilar  (contents: read)  npm ci + tauri build → artefacto Frota.exe (sem secrets)
+#   assinar   (sem permissões)  só instala @tauri-apps/cli fixado, sem código do repositório,
+#                               e assina com a chave privada → artefacto Frota.exe + .sig
+#   publicar  (contents: write) gera latest.json e cria a Release (sem secrets de assinatura)
+#
 # Secrets necessários (Settings → Secrets and variables → Actions):
 #   TAURI_SIGNING_PRIVATE_KEY           conteúdo de %USERPROFILE%\.tauri\frota.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  palavra-passe da chave (pode não existir: chave sem palavra-passe)
@@ -8,6 +14,9 @@
 # latest.json: { versao, notas, url, sha256 (hex minúsculas), assinatura }
 # `assinatura` é o conteúdo de Frota.exe.sig escrito pelo `tauri signer sign`: base64 de
 # uma assinatura minisign, ligada à versão (`--app-version`). Ver src-tauri/src/atualizacao/mod.rs.
+#
+# Segurança: nenhuma expressão de contexto é interpolada dentro de scripts `run:`; os valores entram por
+# `env:` e a tag é validada (^v\d+\.\d+\.\d+$) antes de qualquer uso.
 
 name: Publicar versão
 
@@ -15,34 +24,44 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write
+permissions: {}
+
+env:
+  TAG: ${{ github.ref_name }}
+  # Versão exata de @tauri-apps/cli em package.json/package-lock.json
+  TAURI_CLI: 2.12.3
 
 jobs:
-  publicar:
+  compilar:
     runs-on: windows-latest
+    permissions:
+      contents: read
     defaults:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - name: Validar tag
+        run: |
+          if ($env:TAG -cnotmatch '^v\d+\.\d+\.\d+$') { throw "Tag inválida (esperado vX.Y.Z)" }
 
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
           workspaces: src-tauri
 
       - name: Versão a partir da tag
         run: |
-          $tag = '${{ github.ref_name }}'
-          $versao = $tag.Substring(1)
-          if ($versao -notmatch '^\d+\.\d+\.\d+$') { throw "Tag inválida: $tag (esperado vX.Y.Z)" }
+          $versao = $env:TAG.Substring(1)
           $conf = 'src-tauri/tauri.conf.json'
           $json = Get-Content -Raw $conf | ConvertFrom-Json
           $json.version = $versao
@@ -52,39 +71,108 @@ jobs:
           # só a primeira linha `version = ...` (a do [package])
           $texto = ([regex]'(?m)^version = "[^"]*"').Replace($texto, "version = `"$versao`"", 1)
           Set-Content -Encoding utf8NoBOM -NoNewline $cargo $texto
-          "VERSAO=$versao" >> $env:GITHUB_ENV
-          "TAG=$tag" >> $env:GITHUB_ENV
 
       - run: npm ci
 
       - name: Compilar
         run: npm run tauri build -- --no-bundle
 
+      - name: Frota.exe
+        run: Copy-Item src-tauri/target/release/frota.exe Frota.exe
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frota-exe
+          path: Frota.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  assinar:
+    needs: compilar
+    runs-on: windows-latest
+    permissions: {}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Validar tag
+        run: |
+          if ($env:TAG -cnotmatch '^v\d+\.\d+\.\d+$') { throw "Tag inválida (esperado vX.Y.Z)" }
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frota-exe
+
+      - name: Instalar só o tauri CLI (versão fixa, sem scripts)
+        run: npm i --no-save --no-package-lock --ignore-scripts "@tauri-apps/cli@$env:TAURI_CLI"
+
       - name: Assinar
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          Copy-Item src-tauri/target/release/frota.exe Frota.exe
-          npx tauri signer sign --app-version $env:VERSAO Frota.exe
-          if (-not (Test-Path Frota.exe.sig)) { throw 'Assinatura não criada' }
+          $versao = $env:TAG.Substring(1)
+          npx --no-install tauri signer sign --app-version $versao Frota.exe
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path Frota.exe.sig)) { throw 'Assinatura não criada' }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frota-assinado
+          path: |
+            Frota.exe
+            Frota.exe.sig
+          if-no-files-found: error
+          retention-days: 1
+
+  publicar:
+    needs: assinar
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Validar tag
+        run: |
+          if ($env:TAG -cnotmatch '^v\d+\.\d+\.\d+$') { throw "Tag inválida (esperado vX.Y.Z)" }
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frota-assinado
+          path: publicar
 
       - name: Gerar latest.json
         run: |
+          $versao = $env:TAG.Substring(1)
+          # a tag anotada (com as notas) tem de ser obtida explicitamente
+          git fetch --force origin "refs/tags/$($env:TAG):refs/tags/$($env:TAG)"
           $notas = (git tag -l --format='%(contents)' $env:TAG | Out-String).Trim()
-          if (-not $notas) { $notas = "Versão $env:VERSAO" }
+          if (-not $notas) { $notas = "Versão $versao" }
           $latest = [ordered]@{
-            versao     = $env:VERSAO
+            versao     = $versao
             notas      = $notas
-            url        = "https://github.com/${{ github.repository }}/releases/download/$env:TAG/Frota.exe"
-            sha256     = (Get-FileHash Frota.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-            assinatura = (Get-Content -Raw Frota.exe.sig).Trim()
+            url        = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/Frota.exe"
+            sha256     = (Get-FileHash publicar/Frota.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            assinatura = (Get-Content -Raw publicar/Frota.exe.sig).Trim()
           }
-          $latest | ConvertTo-Json | Set-Content -Encoding utf8NoBOM latest.json
-          Get-Content latest.json
+          $latest | ConvertTo-Json | Set-Content -Encoding utf8NoBOM publicar/latest.json
+          Get-Content publicar/latest.json
           Set-Content -Encoding utf8NoBOM notas.md $notas
 
       - name: Criar Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:TAG Frota.exe latest.json --title "Frota $env:VERSAO" --notes-file notas.md
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $versao = $env:TAG.Substring(1)
+          gh release create $env:TAG publicar/Frota.exe publicar/latest.json --title "Frota $versao" --notes-file notas.md
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao criar a Release' }
