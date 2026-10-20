@@ -118,8 +118,18 @@ pub fn guardar_carro(conn: &Connection, c: &CarroInput) -> Res<i64> {
     if !ESTADOS.contains(&estado) {
         return Err(erro("estado_invalido", "Estado inválido."));
     }
-    let aquisicao = data_opt(&c.data_aquisicao)?.map(fmt_data);
-    let saida = data_opt(&c.data_saida)?.map(fmt_data);
+    let aquisicao_dia = data_opt(&c.data_aquisicao)?;
+    let saida_dia = data_opt(&c.data_saida)?;
+    if let (Some(a), Some(s)) = (aquisicao_dia, saida_dia)
+        && s < a
+    {
+        return Err(erro(
+            "data_invalida",
+            "A data de saída não pode ser anterior à data de aquisição.",
+        ));
+    }
+    let aquisicao = aquisicao_dia.map(fmt_data);
+    let saida = saida_dia.map(fmt_data);
     let duplicada: Option<i64> = conn
         .query_row(
             "SELECT id FROM carros WHERE matricula = ?1 AND id IS NOT ?2",

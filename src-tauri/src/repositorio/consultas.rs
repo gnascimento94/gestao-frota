@@ -1,5 +1,6 @@
 use super::config::obter_limiares;
-use super::lancamentos::{HistoricoItem, historico, nome_documento};
+use super::historico::{HistoricoItem, historico};
+use super::lancamentos::nome_documento;
 use super::motoristas::{atribuicoes_regras, nomes_motoristas};
 use super::{col_data, col_data_opt, data, erro};
 use crate::erro::Res;
@@ -179,6 +180,16 @@ pub fn painel(conn: &Connection, hoje: NaiveDate) -> Res<Painel> {
         },
     );
     let ano = resumir(&todas, &periodo_ano(hoje.year())?);
+    // Por pagar só de carros ativos (os outros estão fora dos alertas, §6.7).
+    let mut st = conn.prepare("SELECT id FROM carros WHERE estado = 'ativo'")?;
+    let ativos = st
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    let por_pagar = todas
+        .iter()
+        .filter(|d| !d.pago && ativos.contains(&d.carro_id))
+        .map(|d| d.valor)
+        .sum();
     let carros_ativos: i64 = conn.query_row(
         "SELECT COUNT(*) FROM carros WHERE estado = 'ativo'",
         [],
@@ -187,7 +198,7 @@ pub fn painel(conn: &Connection, hoje: NaiveDate) -> Res<Painel> {
     Ok(Painel {
         gasto_mes: mes.total,
         gasto_ano: ano.total,
-        por_pagar: ano.por_pagar,
+        por_pagar,
         carros_ativos,
         alertas: alertas(conn, hoje)?,
         recentes: historico(conn, None, 10)?,

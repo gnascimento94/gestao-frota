@@ -1,4 +1,6 @@
-use super::{col_data, col_data_opt, contar, data_opt, erro, fmt_data, nao_encontrado, texto};
+use super::{
+    Tabela, col_data, col_data_opt, contar, data_opt, erro, existe, fmt_data, nao_encontrado, texto,
+};
 use crate::erro::Res;
 use crate::regras::gastos;
 use chrono::NaiveDate;
@@ -137,6 +139,10 @@ pub fn atribuir(
     data: NaiveDate,
 ) -> Res<()> {
     let tx = conn.transaction()?;
+    existe(&tx, Tabela::Carros, carro_id)?;
+    if let Some(m) = motorista_id {
+        existe(&tx, Tabela::Motoristas, m)?;
+    }
     let dia = fmt_data(data);
     let aberta: Option<(i64, i64, String)> = tx
         .query_row(

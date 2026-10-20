@@ -1,8 +1,10 @@
 use super::carros::*;
 use super::config::*;
 use super::consultas::*;
+use super::historico::*;
 use super::lancamentos::*;
 use super::motoristas::*;
+use super::multas::*;
 use super::planos::*;
 use crate::migracoes::migrar;
 use crate::regras::alertas::{Limiares, TipoAlerta};
@@ -356,7 +358,7 @@ fn adiantamento_fica_por_reembolsar_ate_marcar() {
     assert_eq!(r.empresa, 4_000);
     assert_eq!(r.colaborador, 8_000);
     assert_eq!(r.por_reembolsar, 8_000);
-    marcar_reembolsado(&c, id, d(2026, 10, 1)).unwrap();
+    marcar_reembolsado(&c, id, d(2026, 10, 1), hoje()).unwrap();
     assert_eq!(multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar, 0);
     // sem adiantamento não há nada por reembolsar
     let mut sem = multa(a, Some(ana), "2026-09-02", 5_000, "colaborador");
@@ -390,7 +392,7 @@ fn condutor_sugerido_pela_atribuicao() {
         hoje(),
     )
     .unwrap();
-    identificar_condutor(&c, id, bruno, d(2026, 7, 5)).unwrap();
+    identificar_condutor(&c, id, bruno, d(2026, 7, 5), hoje()).unwrap();
     let (mot, em): (i64, String) = c
         .query_row(
             "SELECT motorista_id, condutor_identificado_em FROM multas WHERE id=?1",
@@ -468,7 +470,7 @@ fn pagar_iuc_anual_cria_o_seguinte() {
     i.anual = true;
     i.descricao = Some("IUC 2026".into());
     let id = lancar_documento(&mut c, &i, hoje()).unwrap();
-    let novo = pagar_documento(&mut c, id, d(2026, 5, 20))
+    let novo = pagar_documento(&mut c, id, "2026-05-20", hoje())
         .unwrap()
         .unwrap();
     let (venc, pago, gerado, valor, tipo): (String, Option<String>, i64, i64, String) = c
@@ -483,8 +485,10 @@ fn pagar_iuc_anual_cria_o_seguinte() {
     assert_eq!(gerado, id);
     assert_eq!(valor, 15_000);
     assert_eq!(tipo, "IUC");
-    // pagar outra vez não duplica
-    assert_eq!(pagar_documento(&mut c, id, d(2026, 5, 21)).unwrap(), None);
+    // pagar outra vez é recusado (e não duplica)
+    let e = pagar_documento(&mut c, id, "2026-05-21", hoje()).unwrap_err();
+    assert_eq!(e.codigo, "ja_pago");
+    assert_eq!(e.mensagem, "Este documento já está pago.");
     // não anual: nada
     let n = lancar_documento(
         &mut c,
@@ -492,8 +496,181 @@ fn pagar_iuc_anual_cria_o_seguinte() {
         hoje(),
     )
     .unwrap();
-    assert_eq!(pagar_documento(&mut c, n, d(2026, 10, 1)).unwrap(), None);
+    // data futura recusada
+    assert_eq!(
+        pagar_documento(&mut c, n, "2026-10-21", hoje())
+            .unwrap_err()
+            .codigo,
+        "data_futura"
+    );
+    assert_eq!(
+        pagar_documento(&mut c, n, "2026-10-01", hoje()).unwrap(),
+        None
+    );
+    assert_eq!(
+        pagar_documento(&mut c, 999, "2026-10-01", hoje())
+            .unwrap_err()
+            .codigo,
+        "nao_encontrado"
+    );
     assert_eq!(contar(&c, "SELECT COUNT(*) FROM documentos"), 3);
+}
+
+#[test]
+fn pagar_anual_de_carro_vendido_nao_gera_seguinte() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let mut i = doc(a, "IUC", 15_000, "2026-05-31", None);
+    i.anual = true;
+    let id = lancar_documento(&mut c, &i, hoje()).unwrap();
+    let mut v = carro_input("AA-12-BB");
+    v.id = Some(a);
+    v.estado = "vendido".into();
+    guardar_carro(&c, &v).unwrap();
+    assert_eq!(
+        pagar_documento(&mut c, id, "2026-05-20", hoje()).unwrap(),
+        None
+    );
+    // lançar já pago num carro inativo também não gera
+    v.estado = "inativo".into();
+    guardar_carro(&c, &v).unwrap();
+    let mut j = doc(a, "seguro", 30_000, "2026-06-30", Some("2026-06-01"));
+    j.anual = true;
+    lancar_documento(&mut c, &j, hoje()).unwrap();
+    assert_eq!(contar(&c, "SELECT COUNT(*) FROM documentos"), 2);
+    // de volta a ativo: lançar já pago gera o seguinte
+    v.estado = "ativo".into();
+    guardar_carro(&c, &v).unwrap();
+    lancar_documento(&mut c, &j, hoje()).unwrap();
+    assert_eq!(contar(&c, "SELECT COUNT(*) FROM documentos"), 4);
+}
+
+#[test]
+fn pagar_iuc_anual_nao_poe_o_seguinte_no_topo_dos_recentes() {
+    // `criado_em` vem do relógio do SQLite (UTC): usar esse dia como "hoje".
+    let mut c = bd();
+    let hoje: NaiveDate = {
+        let s: String = c.query_row("SELECT date('now')", [], |r| r.get(0)).unwrap();
+        NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap()
+    };
+    let a = carro(&c, "AA-12-BB");
+    let mut i = doc(a, "IUC", 15_000, "2026-05-31", None);
+    i.anual = true;
+    let id = lancar_documento(&mut c, &i, hoje).unwrap();
+    let novo = pagar_documento(&mut c, id, "2026-05-20", hoje)
+        .unwrap()
+        .unwrap();
+    let m = lancar_manutencao(&mut c, &manut(a, &hoje.to_string(), None), hoje).unwrap();
+    let r = historico(&c, None, 10).unwrap();
+    assert_eq!((r[0].tipo.as_str(), r[0].id), ("manutencao", m));
+    let gerado = r
+        .iter()
+        .find(|x| x.tipo == "documento" && x.id == novo)
+        .unwrap();
+    assert_eq!(gerado.data, hoje.to_string()); // data de registo
+    assert_eq!(gerado.detalhe.as_deref(), Some("vence a 2027-05-31"));
+    let pago = r
+        .iter()
+        .find(|x| x.tipo == "documento" && x.id == id)
+        .unwrap();
+    assert_eq!(pago.data, "2026-05-20");
+    assert_eq!(pago.detalhe, None);
+    assert_eq!(painel(&c, hoje).unwrap().recentes[0].tipo, "manutencao");
+}
+
+#[test]
+fn multa_recusa_datas_futuras_e_pagamento_antes_da_infracao() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let ana = motorista(&c, "Ana");
+    let base = multa(a, Some(ana), "2026-09-01", 6_000, "empresa");
+    type Campo = fn(&mut MultaInput) -> &mut Option<String>;
+    let campos: [Campo; 4] = [
+        |m| &mut m.pago_em,
+        |m| &mut m.reembolsado_em,
+        |m| &mut m.condutor_identificado_em,
+        |m| &mut m.data_notificacao,
+    ];
+    for campo in campos {
+        let mut m = base.clone();
+        *campo(&mut m) = Some("2026-10-21".into());
+        assert_eq!(
+            guardar_multa(&mut c, &m, hoje()).unwrap_err().codigo,
+            "data_futura"
+        );
+        *campo(&mut m) = Some("2026-10-20".into());
+        guardar_multa(&mut c, &m, hoje()).unwrap();
+    }
+    let mut m = base.clone();
+    m.pago_em = Some("2026-08-31".into());
+    let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
+    assert_eq!(e.codigo, "data_invalida");
+    assert_eq!(e.mensagem, "O pagamento não pode ser anterior à infração.");
+    m.pago_em = Some("2026-09-01".into());
+    let id = guardar_multa(&mut c, &m, hoje()).unwrap();
+    assert_eq!(
+        marcar_reembolsado(&c, id, d(2026, 10, 21), hoje())
+            .unwrap_err()
+            .codigo,
+        "data_futura"
+    );
+    marcar_reembolsado(&c, id, d(2026, 10, 20), hoje()).unwrap();
+    assert_eq!(
+        identificar_condutor(&c, id, ana, d(2026, 10, 21), hoje())
+            .unwrap_err()
+            .codigo,
+        "data_futura"
+    );
+    identificar_condutor(&c, id, ana, d(2026, 10, 20), hoje()).unwrap();
+}
+
+#[test]
+fn referencias_inexistentes_e_data_de_saida() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let ref_inv = |e: crate::erro::Erro| {
+        assert_eq!(e.codigo, "referencia_invalida");
+        assert_eq!(e.mensagem, "O registo escolhido já não existe.");
+    };
+    let mut m = manut(a, "2026-10-01", None);
+    m.tipo_id = 999;
+    ref_inv(lancar_manutencao(&mut c, &m, hoje()).unwrap_err());
+    ref_inv(lancar_manutencao(&mut c, &manut(999, "2026-10-01", None), hoje()).unwrap_err());
+    ref_inv(lancar_pneu(&mut c, &pneu(999, "2026-10-01", 1), hoje()).unwrap_err());
+    ref_inv(lancar_documento(&mut c, &doc(999, "IUC", 1, "2026-10-01", None), hoje()).unwrap_err());
+    ref_inv(atualizar_km(&mut c, &km(999, "2026-10-01", 1, false), hoje()).unwrap_err());
+    ref_inv(
+        guardar_multa(
+            &mut c,
+            &multa(a, Some(999), "2026-10-01", 1, "empresa"),
+            hoje(),
+        )
+        .unwrap_err(),
+    );
+    let id = guardar_multa(&mut c, &multa(a, None, "2026-10-01", 1, "empresa"), hoje()).unwrap();
+    ref_inv(identificar_condutor(&c, id, 999, d(2026, 10, 2), hoje()).unwrap_err());
+    ref_inv(atribuir(&mut c, a, Some(999), d(2026, 1, 1)).unwrap_err());
+    ref_inv(atribuir(&mut c, 999, None, d(2026, 1, 1)).unwrap_err());
+    let mut p = PlanoInput {
+        id: None,
+        tipo_id: 999,
+        cada_km: Some(1_000),
+        cada_meses: None,
+        todos_carros: true,
+        carros: vec![],
+    };
+    ref_inv(guardar_plano(&mut c, &p).unwrap_err());
+    p.tipo_id = 1;
+    p.todos_carros = false;
+    p.carros = vec![999];
+    ref_inv(guardar_plano(&mut c, &p).unwrap_err());
+    // data de saída antes da aquisição
+    let mut i = carro_input("CC-34-DD");
+    i.data_aquisicao = Some("2026-03-01".into());
+    i.data_saida = Some("2026-02-28".into());
+    assert_eq!(guardar_carro(&c, &i).unwrap_err().codigo, "data_invalida");
+    i.data_saida = Some("2026-03-01".into());
+    guardar_carro(&c, &i).unwrap();
 }
 
 #[test]
@@ -752,19 +929,32 @@ fn painel_conta_alertas_de_carros_ativos_apenas() {
         },
     )
     .unwrap();
-    // documento por pagar do carro vendido também não aparece
+    // documento por pagar do carro vendido: nem alerta nem "por pagar"
     lancar_documento(
         &mut c,
         &doc(vendido, "seguro", 1_000, "2026-10-25", None),
         hoje(),
     )
     .unwrap();
+    // por pagar do carro ativo, longe do vencimento (sem alerta)
+    lancar_documento(
+        &mut c,
+        &doc(ativo, "seguro", 2_000, "2027-06-01", None),
+        hoje(),
+    )
+    .unwrap();
     lancar_manutencao(&mut c, &manut(ativo, "2026-10-02", None), hoje()).unwrap();
-    lancar_manutencao(&mut c, &manut(vendido, "2026-10-03", None), hoje()).unwrap();
+    // gasto do vendido em outubro (pneus não mexem nos planos); o vendido não tem
+    // manutenção nenhuma: o plano estaria vencido (70 000 >= 50 000 + 15 000) se contasse.
+    lancar_pneu(&mut c, &pneu(vendido, "2026-10-03", 1_000), hoje()).unwrap();
 
     let p = painel(&c, hoje()).unwrap();
     assert_eq!(p.carros_ativos, 1);
-    assert_eq!(p.alertas.len(), 0, "a manutenção do tipo 1 zera o alerta");
+    assert_eq!(
+        p.alertas.len(),
+        0,
+        "a manutenção do tipo 1 zera o alerta do ativo; o vendido fica de fora"
+    );
 
     // apagar a manutenção do carro ativo -> volta o alerta (base = km_inicial 50 000)
     let id: i64 = c
@@ -780,10 +970,10 @@ fn painel_conta_alertas_de_carros_ativos_apenas() {
     assert_eq!(p.alertas[0].tipo, TipoAlerta::Manutencao);
     assert_eq!(p.alertas[0].carro_id, Some(ativo));
     assert_eq!(p.alertas[0].falta_km, Some(-1_000));
-    assert_eq!(p.gasto_mes, 1_000); // manutenção do vendido em outubro
+    assert_eq!(p.gasto_mes, 1_000); // pneus do vendido em outubro
     assert_eq!(p.gasto_ano, 1_000);
-    assert_eq!(p.por_pagar, 1_000);
-    assert_eq!(p.recentes.len(), 4); // 2 KM + 1 documento + 1 manutenção
+    assert_eq!(p.por_pagar, 2_000); // só o documento do carro ativo
+    assert_eq!(p.recentes.len(), 5); // 2 KM + 2 documentos + 1 pneu
     assert_eq!(listar_carros(&c, true, 2026).unwrap().len(), 1);
     assert_eq!(listar_carros(&c, false, 2026).unwrap().len(), 2);
 }

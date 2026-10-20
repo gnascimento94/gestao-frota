@@ -1,4 +1,4 @@
-use super::{erro, nao_encontrado};
+use super::{Tabela, erro, existe, nao_encontrado};
 use crate::erro::Res;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -128,6 +128,12 @@ pub fn guardar_plano(conn: &mut Connection, p: &PlanoInput) -> Res<i64> {
         return Err(erro("plano_sem_carros", "Escolha pelo menos um carro."));
     }
     let tx = conn.transaction()?;
+    existe(&tx, Tabela::TiposManutencao, p.tipo_id)?;
+    if !p.todos_carros {
+        for c in &p.carros {
+            existe(&tx, Tabela::Carros, *c)?;
+        }
+    }
     let id = match p.id {
         None => {
             tx.execute(
