@@ -218,8 +218,10 @@ Valores em cêntimos (inteiro). Datas `AAAA-MM-DD`. Todas as tabelas têm `id`, 
   divisórias rígidas.
 - Fonte do sistema (Segoe UI Variable, `system-ui`); títulos e números grandes com tracking
   negativo (~-0.02em) e line-height apertado; algarismos tabulares nos valores.
-- Cor de destaque tirada do logo; vermelho/laranja só para alertas. Tema claro/escuro segue o
-  Windows.
+- Logo (`Logo.png`, monocromático #2B2B2B): usado como máscara/silhueta — cinzento-escuro no tema
+  claro, branco no tema escuro. Como o logo não tem cor, a cor de destaque (botões, seleção) é
+  escolhida à parte: por omissão azul sistema (#0A84FF / #0071E3), alterável num só token CSS.
+  Vermelho/laranja só para alertas. Tema claro/escuro segue o Windows.
 - Movimento: molas criticamente amortecidas (sem ressalto), resposta ~0,3–0,4 s. O painel Lançar
   nasce e regressa ao botão "+". Feedback no clique (pressed), nada bloqueia o rato,
   animações interrompíveis.
