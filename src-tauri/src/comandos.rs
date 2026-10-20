@@ -1,7 +1,7 @@
 //! Comandos Tauri. Cada escrita passa por `Estado::mutar` (recusada em modo
-//! consulta; marca a alteraÃ§Ã£o para gravar). SÃ³ aqui se lÃª o relÃ³gio.
+//! consulta; marca a alteração para gravar). Só aqui se lê o relógio.
 //!
-//! Os comandos correm fora da thread principal (`async`) para nÃ£o bloquear a janela.
+//! Os comandos correm fora da thread principal (`async`) para não bloquear a janela.
 
 use crate::armazenamento::versoes::Versao;
 use crate::erro::Res;
@@ -13,7 +13,7 @@ use crate::repositorio::historico::{self, HistoricoItem};
 use crate::repositorio::lancamentos::{
     self, DocumentoInput, KmInput, ManutencaoInput, PneuInput,
 };
-use crate::repositorio::motoristas::{self, Motorista, MotoristaInput};
+use crate::repositorio::motoristas::{self, Atribuicao, FiltroAtribuicoes, Motorista, MotoristaInput};
 use crate::repositorio::multas::{self, MultaInput, ResumoMultasMotorista};
 use crate::repositorio::planos::{self, Plano, PlanoInput, TipoManutencao};
 use crate::repositorio::{config, data as ler_data};
@@ -108,7 +108,18 @@ pub fn atribuir(e: E<'_>, carro_id: i64, motorista_id: Option<i64>, data: String
     e.mutar(agora(), |c| motoristas::atribuir(c, carro_id, motorista_id, dia))
 }
 
-// ---------- lanÃ§amentos ----------
+/// Atribuições (mais recentes primeiro), filtradas por carro e/ou motorista.
+#[tauri::command(async)]
+pub fn atribuicoes_listar(
+    e: E<'_>,
+    carro_id: Option<i64>,
+    motorista_id: Option<i64>,
+) -> Res<Vec<Atribuicao>> {
+    let f = FiltroAtribuicoes { carro_id, motorista_id };
+    e.ler(|c| motoristas::atribuicoes_de(c, &f))
+}
+
+// ---------- lançamentos ----------
 
 #[tauri::command(async)]
 pub fn lancar_manutencao(e: E<'_>, input: ManutencaoInput) -> Res<i64> {
@@ -186,7 +197,7 @@ pub fn multas_motorista(e: E<'_>, motorista_id: i64) -> Res<ResumoMultasMotorist
     e.ler(|c| multas::multas_motorista(c, motorista_id, h))
 }
 
-// ---------- histÃ³rico ----------
+// ---------- histórico ----------
 
 /// `carro_id: None` = todos os carros.
 #[tauri::command(async)]
@@ -201,7 +212,7 @@ pub fn tipos_listar(e: E<'_>) -> Res<Vec<TipoManutencao>> {
     e.ler(planos::listar_tipos)
 }
 
-/// `id: None` cria; senÃ£o renomeia.
+/// `id: None` cria; senão renomeia.
 #[tauri::command(async)]
 pub fn tipo_guardar(e: E<'_>, id: Option<i64>, nome: String) -> Res<i64> {
     e.mutar(agora(), |c| planos::guardar_tipo(c, id, &nome))
@@ -222,7 +233,7 @@ pub fn plano_apagar(e: E<'_>, id: i64) -> Res<()> {
     e.mutar(agora(), |c| planos::apagar_plano(c, id))
 }
 
-// ---------- configuraÃ§Ã£o ----------
+// ---------- configuração ----------
 
 #[tauri::command(async)]
 pub fn limiares_obter(e: E<'_>) -> Res<Limiares> {

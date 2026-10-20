@@ -48,11 +48,27 @@ fn bloqueado(pc: impl Into<String>) -> Erro {
     Erro { codigo: "bloqueado".into(), mensagem: pc.into() }
 }
 
-/// Falha se o lock pertence a outro PC e está fresco (ou não se consegue ler).
+/// Lock ilegível (lixo ou erro de leitura): aplica a regra dos 120 s à data de
+/// modificação do ficheiro. Sem data (ou não é um ficheiro) conta como recente.
+fn ilegivel_recente(caminho: &Path, agora: DateTime<Utc>) -> bool {
+    match std::fs::metadata(caminho) {
+        Ok(m) if m.is_file() => m
+            .modified()
+            .map(|t| fresco(agora, DateTime::<Utc>::from(t)))
+            .unwrap_or(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        _ => true,
+    }
+}
+
+/// Falha se o lock pertence a outro PC e está fresco, ou se é ilegível e foi
+/// modificado há 120 s ou menos.
 fn verificar(caminho: &Path, pc: &str, agora: DateTime<Utc>) -> Result<(), Erro> {
     match ler(caminho) {
         Estado::Valido(outro, hora) if outro != pc && fresco(agora, hora) => Err(bloqueado(outro)),
-        Estado::Desconhecido => Err(bloqueado("desconhecido")),
+        Estado::Lixo | Estado::Desconhecido if ilegivel_recente(caminho, agora) => {
+            Err(bloqueado("desconhecido"))
+        }
         _ => Ok(()),
     }
 }
@@ -144,11 +160,32 @@ mod testes {
         adquirir(&p, "PC-X", agora()).unwrap();
     }
 
+    fn mudar_mtime(p: &Path, quando: DateTime<Utc>) {
+        std::fs::File::options()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_modified(std::time::SystemTime::from(quando))
+            .unwrap();
+    }
+
     #[test]
-    fn lock_ilegivel_e_tratado_como_abandonado() {
+    fn lock_ilegivel_antigo_e_tratado_como_abandonado() {
         let (_t, p) = caminho();
         std::fs::write(&p, b"\xff\xfelixo sem formato").unwrap();
+        mudar_mtime(&p, agora() - Duration::seconds(121));
         adquirir(&p, "PC-Y", agora()).unwrap();
+        assert!(std::fs::read_to_string(&p).unwrap().starts_with("PC-Y\n"));
+    }
+
+    #[test]
+    fn lock_ilegivel_recente_bloqueia() {
+        let (_t, p) = caminho();
+        std::fs::write(&p, b"lixo sem formato").unwrap();
+        mudar_mtime(&p, agora() - Duration::seconds(10));
+        let e = adquirir(&p, "PC-Y", agora()).err().unwrap();
+        assert_eq!((e.codigo.as_str(), e.mensagem.as_str()), ("bloqueado", "desconhecido"));
+        assert_eq!(std::fs::read(&p).unwrap(), b"lixo sem formato");
     }
 
     #[test]

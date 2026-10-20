@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   Arranque,
+  Atribuicao,
   Carro,
   CarroInput,
   DocumentoInput,
@@ -69,6 +70,13 @@ export const motoristaApagar = (id: number) => invoke<void>('motorista_apagar', 
 /** `motoristaId: null` deixa o carro sem motorista. */
 export const atribuir = (carroId: number, motoristaId: number | null, data: string) =>
   invoke<void>('atribuir', { carroId, motoristaId, data })
+
+/** Atribuições (mais recentes primeiro), filtradas por carro e/ou motorista. */
+export const atribuicoesListar = (carroId?: number | null, motoristaId?: number | null) =>
+  invoke<Atribuicao[]>('atribuicoes_listar', {
+    carroId: carroId ?? null,
+    motoristaId: motoristaId ?? null,
+  })
 
 // ---------- lançamentos ----------
 

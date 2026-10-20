@@ -214,11 +214,12 @@ fn copia_manual_sem_poda(conn: &Connection, dir: &Path, agora: NaiveDateTime) ->
 }
 
 /// Cópia manual do estado ATUAL da ligação (pode ser mais recente que `banco`).
-pub fn copia_manual(conn: &Connection, c: &Caminhos, agora: NaiveDateTime) -> Res<()> {
+/// Devolve o nome do ficheiro criado.
+pub fn copia_manual(conn: &Connection, c: &Caminhos, agora: NaiveDateTime) -> Res<String> {
     let dir = pasta(c)?;
     let nome = copia_manual_sem_poda(conn, &dir, agora)?;
     podar_datadas(&dir, &[&nome])?;
-    Ok(())
+    Ok(nome)
 }
 
 fn contar(conn: &Connection, sql: &str) -> rusqlite::Result<i64> {
@@ -276,9 +277,17 @@ fn corrompida() -> Erro {
     }
 }
 
-/// Repõe uma versão: verifica-a, guarda uma cópia manual do estado atual,
+/// Repõe uma versão: verifica-a, guarda uma cópia manual do estado atual
+/// (se `copia_seguranca`; `false` só quando `conn` não tem dados reais, p.ex. a
+/// ligação vazia usada depois de um arranque com o banco corrompido),
 /// carrega-a em `conn`, migra e grava.
-pub fn restaurar(conn: &mut Connection, c: &Caminhos, nome: &str, agora: NaiveDateTime) -> Res<()> {
+pub fn restaurar(
+    conn: &mut Connection,
+    c: &Caminhos,
+    nome: &str,
+    copia_seguranca: bool,
+    agora: NaiveDateTime,
+) -> Res<()> {
     if nome.is_empty()
         || nome.contains(['/', '\\'])
         || nome.contains("..")
@@ -313,7 +322,11 @@ pub fn restaurar(conn: &mut Connection, c: &Caminhos, nome: &str, agora: NaiveDa
         });
     }
     // 2. cópia de segurança do estado atual (a poda só acontece no fim)
-    let seguranca = copia_manual_sem_poda(conn, &dir, agora)?;
+    let seguranca = if copia_seguranca {
+        Some(copia_manual_sem_poda(conn, &dir, agora)?)
+    } else {
+        None
+    };
     // 3. carregar a versão na ligação (API de backup)
     {
         let b = rusqlite::backup::Backup::new(&origem_conn, conn)?;
@@ -330,7 +343,10 @@ pub fn restaurar(conn: &mut Connection, c: &Caminhos, nome: &str, agora: NaiveDa
     migrar(conn)?;
     gravar(conn, c)?;
     // 4. só agora se poda, protegendo a cópia de segurança e a versão usada
-    podar_datadas(&dir, &[&seguranca, nome])?;
+    match &seguranca {
+        Some(s) => podar_datadas(&dir, &[s, nome])?,
+        None => podar_datadas(&dir, &[nome])?,
+    }
     podar_antes(&dir, &[nome])?;
     Ok(())
 }
@@ -487,7 +503,7 @@ mod testes {
         copia_manual(&conn, &c, t1).unwrap();
         inserir_carro(&conn, "BB-11-BB");
         let t2 = dia(0).and_hms_opt(11, 0, 0).unwrap();
-        restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", t2).unwrap();
+        restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", true, t2).unwrap();
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         let seg = listar(&c).unwrap().into_iter().find(|v| v.nome == "frota_2026-01-01_1100.db").unwrap();
@@ -500,6 +516,21 @@ mod testes {
     }
 
     #[test]
+    fn restaurar_sem_copia_de_seguranca_nao_cria_versao() {
+        let (_t, c, conn) = cenario();
+        inserir_carro(&conn, "AA-00-AA");
+        let t1 = dia(0).and_hms_opt(10, 0, 0).unwrap();
+        assert_eq!(copia_manual(&conn, &c, t1).unwrap(), "frota_2026-01-01_1000.db");
+        let mut vazia = Connection::open_in_memory().unwrap();
+        let t2 = dia(0).and_hms_opt(11, 0, 0).unwrap();
+        restaurar(&mut vazia, &c, "frota_2026-01-01_1000.db", false, t2).unwrap();
+        let ns: Vec<_> = listar(&c).unwrap().into_iter().map(|v| v.nome).collect();
+        assert_eq!(ns, vec!["frota_2026-01-01_1000.db"]);
+        let n: i64 = vazia.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
     fn duas_restauracoes_no_mesmo_minuto_nao_perdem_o_estado() {
         let (_t, c, mut conn) = cenario();
         inserir_carro(&conn, "AA-00-AA");
@@ -509,8 +540,8 @@ mod testes {
         inserir_carro(&conn, "CC-22-CC"); // estado B: 3 carros
         let t1 = dia(0).and_hms_opt(11, 0, 10).unwrap();
         let t2 = dia(0).and_hms_opt(11, 0, 40).unwrap();
-        restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", t1).unwrap();
-        restaurar(&mut conn, &c, "frota_2026-01-01_1001.db", t2).unwrap();
+        restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", true, t1).unwrap();
+        restaurar(&mut conn, &c, "frota_2026-01-01_1001.db", true, t2).unwrap();
         let l = listar(&c).unwrap();
         let a = l.iter().find(|v| v.nome == "frota_2026-01-01_1100.db").unwrap();
         let b = l.iter().find(|v| v.nome == "frota_2026-01-01_1100-2.db").unwrap();
@@ -518,7 +549,7 @@ mod testes {
         assert_eq!(b.carros, 1); // estado após a 1.ª restauração
         assert_eq!(b.data, "2026-01-01 11:00");
         // e o sufixo é restaurável
-        restaurar(&mut conn, &c, "frota_2026-01-01_1100-2.db", dia(0).and_hms_opt(11, 5, 0).unwrap()).unwrap();
+        restaurar(&mut conn, &c, "frota_2026-01-01_1100-2.db", true, dia(0).and_hms_opt(11, 5, 0).unwrap()).unwrap();
     }
 
     #[test]
@@ -530,7 +561,7 @@ mod testes {
             copia_diaria(&c, dia(i)).unwrap();
         }
         inserir_carro(&conn, "BB-11-BB");
-        restaurar(&mut conn, &c, "frota_2026-01-01.db", dia(40).and_hms_opt(9, 0, 0).unwrap()).unwrap();
+        restaurar(&mut conn, &c, "frota_2026-01-01.db", true, dia(40).and_hms_opt(9, 0, 0).unwrap()).unwrap();
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         let ns = nomes(&c, "frota_2");
@@ -559,7 +590,7 @@ mod testes {
         copia_manual(&conn, &c, dia(0).and_hms_opt(10, 0, 0).unwrap()).unwrap();
         let p = c.dados.join("versoes").join("frota_2026-01-01_1000.db");
         Connection::open(&p).unwrap().execute_batch("PRAGMA user_version=99").unwrap();
-        let e = restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", dia(1).and_hms_opt(10, 0, 0).unwrap()).unwrap_err();
+        let e = restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", true, dia(1).and_hms_opt(10, 0, 0).unwrap()).unwrap_err();
         assert_eq!(e.codigo, "versao_mais_recente");
         assert_eq!(nomes(&c, "frota_2").len(), 1);
     }
@@ -582,7 +613,7 @@ mod testes {
         inserir_carro(&conn, "AA-00-AA");
         let t = dia(0).and_hms_opt(10, 0, 0).unwrap();
         for nome in ["..\\frota.db", "../frota.db", "a/b.db", "", "..", "inexistente.db"] {
-            let e = restaurar(&mut conn, &c, nome, t).unwrap_err();
+            let e = restaurar(&mut conn, &c, nome, true, t).unwrap_err();
             assert_eq!(e.codigo, "versao_invalida", "{nome}");
         }
         assert!(listar(&c).unwrap().is_empty());
@@ -597,7 +628,7 @@ mod testes {
         std::fs::create_dir_all(c.dados.join("versoes")).unwrap();
         std::fs::write(c.dados.join("versoes").join("frota_2025-12-31.db"), vec![0xABu8; 4096]).unwrap();
         let t = dia(0).and_hms_opt(10, 0, 0).unwrap();
-        let e = restaurar(&mut conn, &c, "frota_2025-12-31.db", t).unwrap_err();
+        let e = restaurar(&mut conn, &c, "frota_2025-12-31.db", true, t).unwrap_err();
         assert_eq!(e.codigo, "corrompido");
         assert_eq!(nomes(&c, "frota_2").len(), 1); // sem cópia de segurança
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();

@@ -93,6 +93,17 @@ export interface MotoristaInput {
   notas?: string | null
 }
 
+export interface Atribuicao {
+  id: number
+  carroId: number
+  matricula: string
+  motoristaId: number
+  motoristaNome: string
+  de: string
+  /** null = atribuição atual. */
+  ate: string | null
+}
+
 // ---------- lançamentos ----------
 
 export interface ManutencaoInput {

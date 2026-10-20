@@ -4,6 +4,14 @@
 //! Só a camada de comandos lê o relógio; aqui `agora`/`hoje` chegam por parâmetro.
 //!
 //! Ordem dos mutexes (para não haver deadlocks): `conn` → `lock` → restantes.
+//!
+//! **Nunca gravar por cima de dados gravados noutro PC.** Depois de cada
+//! gravação própria guarda-se a assinatura do `banco` (tamanho, data de
+//! modificação e os primeiros 100 bytes) em `<local>\assinatura`. Antes de cada
+//! gravação (e no arranque, quando há `pendente`), se o `banco` existir e a
+//! assinatura for diferente, houve uma gravação noutro PC: em vez de gravar, a
+//! cópia de trabalho é guardada como versão (`copia_manual`) e o `pendente`
+//! removido. Sem ficheiro de assinatura (primeira vez) não há conflito.
 
 use crate::armazenamento::gravacao::{self, Caminhos};
 use crate::armazenamento::lock::{self, Lock};
@@ -12,9 +20,11 @@ use crate::erro::{Erro, Res};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
+use std::time::UNIX_EPOCH;
 
 /// Segundos desde a última alteração antes de gravar.
 const ATRASO_GRAVAR: i64 = 2;
@@ -22,6 +32,9 @@ const ATRASO_GRAVAR: i64 = 2;
 const REPETIR_APOS_FALHA: i64 = 60;
 /// Segundos entre renovações do lock.
 const RENOVAR_LOCK: i64 = 30;
+/// Intervalo sem renovar a partir do qual o lock pode ter sido assumido por
+/// outro PC (p.ex. depois de o PC estar suspenso).
+const LOCK_ABANDONADO: i64 = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "estado", rename_all = "camelCase")]
@@ -55,6 +68,8 @@ pub struct Estado {
     sujo: AtomicBool,
     raiz: PathBuf,
     pc: String,
+    /// `<local>\assinatura`: assinatura do `banco` na última gravação própria.
+    assinatura: PathBuf,
     arranque: Mutex<Arranque>,
     ultima_alteracao: Mutex<Option<NaiveDateTime>>,
     /// Hora da última gravação falhada (controla a repetição a cada 60 s).
@@ -79,6 +94,20 @@ fn sem_dados() -> Erro {
     erro("sem_dados", "Os dados não estão abertos.")
 }
 
+fn msg_conflito(agora: NaiveDateTime) -> String {
+    format!(
+        "Os dados foram alterados noutro PC. As alterações feitas neste PC foram guardadas em Backup (cópia de {}). Feche e volte a abrir o sistema.",
+        agora.format("%d/%m %H:%M")
+    )
+}
+
+fn msg_conflito_sem_copia(e: &Erro) -> String {
+    format!(
+        "Os dados foram alterados noutro PC. Não foi possível guardar uma cópia das alterações deste PC ({}); continuam neste computador. Feche e volte a abrir o sistema.",
+        e.mensagem
+    )
+}
+
 /// Hora local -> UTC (o lock guarda RFC 3339).
 pub(crate) fn para_utc(agora: NaiveDateTime) -> DateTime<Utc> {
     Local
@@ -96,6 +125,21 @@ pub fn no_google_drive(pasta: &Path) -> bool {
         .any(|p| s.contains(p))
 }
 
+/// Tamanho, data de modificação (ns) e primeiros 100 bytes (hex) do ficheiro;
+/// `None` se não existir ou não se conseguir ler.
+fn assinatura_de(p: &Path) -> Option<String> {
+    let m = std::fs::metadata(p).ok()?;
+    let mtime = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos();
+    let mut cab = Vec::with_capacity(100);
+    std::fs::File::open(p)
+        .ok()?
+        .take(100)
+        .read_to_end(&mut cab)
+        .ok()?;
+    let hex: String = cab.iter().map(|b| format!("{b:02x}")).collect();
+    Some(format!("{}\n{mtime}\n{hex}", m.len()))
+}
+
 impl Estado {
     fn novo(raiz: &Path, local: &Path, pc: &str) -> Estado {
         Estado {
@@ -108,6 +152,7 @@ impl Estado {
             sujo: AtomicBool::new(false),
             raiz: raiz.to_path_buf(),
             pc: pc.to_string(),
+            assinatura: local.join("assinatura"),
             arranque: Mutex::new(Arranque::Ok),
             ultima_alteracao: Mutex::new(None),
             ultima_falha: Mutex::new(None),
@@ -127,6 +172,41 @@ impl Estado {
     fn caminho_lock(&self) -> PathBuf {
         self.caminhos.dados.join("frota.lock")
     }
+
+    fn pendente(&self) -> bool {
+        self.caminhos.pendente.try_exists().unwrap_or(false)
+    }
+
+    // ---------- assinatura do banco ----------
+
+    /// Guarda a assinatura atual do `banco` (escrita atómica). Se falhar, apaga a
+    /// antiga: sem assinatura não há conflito, com uma desatualizada haveria um
+    /// conflito falso.
+    fn registar_assinatura(&self) {
+        let ok = assinatura_de(&self.caminhos.banco).is_some_and(|s| {
+            let mut tmp = self.assinatura.as_os_str().to_owned();
+            tmp.push(".tmp");
+            let tmp = PathBuf::from(tmp);
+            let r = std::fs::write(&tmp, s).and_then(|_| std::fs::rename(&tmp, &self.assinatura));
+            if r.is_err() {
+                let _ = std::fs::remove_file(&tmp);
+            }
+            r.is_ok()
+        });
+        if !ok {
+            let _ = std::fs::remove_file(&self.assinatura);
+        }
+    }
+
+    /// O `banco` foi gravado por outro PC desde a nossa última gravação?
+    fn alterado_fora(&self) -> bool {
+        let Ok(guardada) = std::fs::read_to_string(&self.assinatura) else {
+            return false;
+        };
+        assinatura_de(&self.caminhos.banco).is_some_and(|atual| atual != guardada)
+    }
+
+    // ---------- arranque ----------
 
     fn iniciar(&self, agora: NaiveDateTime) -> Arranque {
         let c = &self.caminhos;
@@ -148,12 +228,30 @@ impl Estado {
             Err(e) if e.codigo == "bloqueado" => return Arranque::Bloqueado { pc: e.mensagem },
             Err(e) => return Arranque::SemPasta { mensagem: e.mensagem },
         };
+        // Alterações pendentes feitas sobre um banco que entretanto outro PC
+        // gravou: guardam-se como versão e segue-se a partir do banco.
+        let mut aviso = None;
+        if self.pendente() && c.trabalho.try_exists().unwrap_or(false) && self.alterado_fora() {
+            match self.preservar_trabalho(agora) {
+                Ok(()) => aviso = Some(msg_conflito(agora)),
+                Err(e) => {
+                    let _ = l.libertar();
+                    return Arranque::SemPasta { mensagem: msg_conflito_sem_copia(&e) };
+                }
+            }
+        }
         match gravacao::preparar_trabalho(c) {
             Ok(conn) => {
                 self.instalar(&mut trava(&self.conn), conn, l, agora);
+                if aviso.is_some() {
+                    *trava(&self.erro_gravacao) = aviso;
+                }
                 Arranque::Ok
             }
             Err(e) => {
+                if aviso.is_some() {
+                    *trava(&self.erro_gravacao) = aviso;
+                }
                 let _ = l.libertar();
                 match e.codigo.as_str() {
                     "corrompido" => Arranque::Corrompido,
@@ -164,16 +262,29 @@ impl Estado {
         }
     }
 
+    /// Guarda `trabalho.db` como versão e remove o `pendente` (arranque).
+    fn preservar_trabalho(&self, agora: NaiveDateTime) -> Res<()> {
+        let conn = Connection::open(&self.caminhos.trabalho)?;
+        versoes::copia_manual(&conn, &self.caminhos, agora)?;
+        drop(conn);
+        std::fs::remove_file(&self.caminhos.pendente)?;
+        Ok(())
+    }
+
     /// Passa a trabalhar sobre `conn` com o lock `l` (modo normal).
     fn instalar(&self, slot: &mut Option<Connection>, conn: Connection, l: Lock, agora: NaiveDateTime) {
         *slot = Some(conn);
         *trava(&self.lock) = Some(l);
         *trava(&self.ultima_renovacao) = Some(agora);
         self.so_consulta.store(false, Ordering::SeqCst);
-        // Uma gravação pendente que falhou durante o arranque volta a ser tentada.
-        if self.caminhos.pendente.try_exists().unwrap_or(false) {
+        if self.pendente() {
+            // A gravação pendente falhou durante o arranque: volta a ser tentada.
+            // A assinatura guardada continua a ser a do banco em que o trabalho se baseia.
             *trava(&self.ultima_alteracao) = Some(agora);
             self.sujo.store(true, Ordering::SeqCst);
+        } else {
+            // trabalho == banco
+            self.registar_assinatura();
         }
     }
 
@@ -211,6 +322,8 @@ impl Estado {
         Ok(())
     }
 
+    // ---------- alterações ----------
+
     fn marcar(&self) {
         if let Err(e) = gravacao::marcar_pendente(&self.caminhos) {
             *trava(&self.erro_gravacao) = Some(e.mensagem);
@@ -236,7 +349,7 @@ impl Estado {
     }
 
     /// Escrita: recusada em modo consulta; o marcador `pendente` é criado antes
-    /// de `f` e, se `f` correr bem, a alteração fica registada para gravar.
+    /// de `f` e, se `f` correr bem, `alterado` regista a alteração para gravar.
     pub fn mutar<T>(&self, agora: NaiveDateTime, f: impl FnOnce(&mut Connection) -> Res<T>) -> Res<T> {
         if self.so_consulta.load(Ordering::SeqCst) {
             return Err(erro_so_consulta());
@@ -252,12 +365,47 @@ impl Estado {
         Ok(r)
     }
 
-    /// Chamado a cada segundo.
+    // ---------- conflitos ----------
+
+    /// Guarda o estado atual de `conn` como versão e remove o `pendente`.
+    /// Devolve o nome da versão.
+    fn salvaguardar(&self, conn: &Connection, agora: NaiveDateTime) -> Res<String> {
+        let nome = versoes::copia_manual(conn, &self.caminhos, agora)?;
+        match std::fs::remove_file(&self.caminhos.pendente) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        self.sujo.store(false, Ordering::SeqCst);
+        Ok(nome)
+    }
+
+    /// Outro PC gravou o `banco`: não gravar; guardar o trabalho como versão,
+    /// passar a consulta e largar o lock. Devolve o erro a mostrar.
+    /// Requer: quem chama segura `conn` e NÃO segura `lock`.
+    fn entrar_em_conflito(&self, conn: &Connection, agora: NaiveDateTime) -> Erro {
+        self.so_consulta.store(true, Ordering::SeqCst);
+        let msg = match self.salvaguardar(conn, agora) {
+            Ok(_) => msg_conflito(agora),
+            Err(e) => msg_conflito_sem_copia(&e),
+        };
+        *trava(&self.erro_gravacao) = Some(msg.clone());
+        if let Some(l) = trava(&self.lock).take() {
+            let _ = l.libertar(); // só apaga se ainda for nosso
+        }
+        erro("conflito", msg)
+    }
+
+    // ---------- gravação automática ----------
+
+    /// Chamado a cada segundo. Segura `conn` durante a renovação e a gravação.
     pub fn tick(&self, agora: NaiveDateTime) {
         if self.fechado.load(Ordering::SeqCst) {
             return;
         }
-        self.renovar_lock(agora);
+        let g = trava(&self.conn);
+        let Some(conn) = g.as_ref() else { return };
+        self.renovar_lock(conn, agora);
         if self.so_consulta.load(Ordering::SeqCst) || !self.sujo.load(Ordering::SeqCst) {
             return;
         }
@@ -268,42 +416,61 @@ impl Estado {
                 .is_none_or(|a| agora - a >= Duration::seconds(ATRASO_GRAVAR)),
         };
         if pronto {
-            let _ = self.gravar_agora(agora);
+            let _ = self.gravar_com(conn, agora);
         }
     }
 
-    fn renovar_lock(&self, agora: NaiveDateTime) {
-        let devido = trava(&self.ultima_renovacao)
-            .is_none_or(|r| agora - r >= Duration::seconds(RENOVAR_LOCK));
-        if !devido {
+    fn renovar_lock(&self, conn: &Connection, agora: NaiveDateTime) {
+        let ultima = *trava(&self.ultima_renovacao);
+        if ultima.is_some_and(|r| agora - r < Duration::seconds(RENOVAR_LOCK)) {
             return;
         }
+        let suspenso = ultima.is_some_and(|r| agora - r >= Duration::seconds(LOCK_ABANDONADO));
         let mut g = trava(&self.lock);
         let Some(l) = g.as_ref() else { return };
         *trava(&self.ultima_renovacao) = Some(agora);
+        if suspenso && self.alterado_fora() {
+            drop(g);
+            self.entrar_em_conflito(conn, agora);
+            return;
+        }
         match l.renovar(para_utc(agora)) {
-            // "desconhecido" = não se conseguiu ler o lock (p.ex. falha momentânea
+            // "desconhecido" = lock ilegível e recente (p.ex. falha momentânea
             // do Drive): tenta-se outra vez na próxima renovação.
             Err(e) if e.codigo == "bloqueado" && e.mensagem != "desconhecido" => {
                 self.so_consulta.store(true, Ordering::SeqCst);
                 *g = None; // já não é nosso: não o libertar
-                *trava(&self.erro_gravacao) = Some(format!(
-                    "O sistema foi aberto noutro PC ({}). Os dados deste PC continuam guardados localmente.",
-                    e.mensagem
-                ));
+                drop(g);
+                let por_gravar = self.sujo.load(Ordering::SeqCst) || self.pendente();
+                let msg = match por_gravar.then(|| self.salvaguardar(conn, agora)) {
+                    Some(Ok(_)) => format!(
+                        "O sistema foi aberto noutro PC ({}). As alterações feitas neste PC foram guardadas em Backup (cópia de {}). Feche e volte a abrir o sistema.",
+                        e.mensagem,
+                        agora.format("%d/%m %H:%M")
+                    ),
+                    _ => format!(
+                        "O sistema foi aberto noutro PC ({}). Os dados deste PC continuam guardados localmente.",
+                        e.mensagem
+                    ),
+                };
+                *trava(&self.erro_gravacao) = Some(msg);
             }
             _ => {}
         }
     }
 
-    fn gravar_agora(&self, agora: NaiveDateTime) -> Res<()> {
-        let g = trava(&self.conn);
-        let Some(conn) = g.as_ref() else { return Ok(()) };
+    /// Grava `conn` no `banco`, salvo em consulta ou se outro PC o alterou.
+    /// Requer: quem chama segura `conn` e NÃO segura `lock`.
+    fn gravar_com(&self, conn: &Connection, agora: NaiveDateTime) -> Res<()> {
         if self.so_consulta.load(Ordering::SeqCst) {
             return Ok(());
         }
+        if self.alterado_fora() {
+            return Err(self.entrar_em_conflito(conn, agora));
+        }
         match gravacao::gravar(conn, &self.caminhos) {
             Ok(()) => {
+                self.registar_assinatura();
                 self.sujo.store(false, Ordering::SeqCst);
                 *trava(&self.ultima_gravacao) = Some(agora);
                 *trava(&self.erro_gravacao) = None;
@@ -318,34 +485,36 @@ impl Estado {
         }
     }
 
-    /// Grava (se houver alterações), faz a cópia diária e liberta o lock.
-    /// Só atua na primeira chamada.
+    /// Grava (se houver alterações e o banco não tiver sido alterado noutro PC),
+    /// faz a cópia diária e liberta o lock. Só atua na primeira chamada.
     pub fn fechar(&self, hoje: NaiveDate, agora: NaiveDateTime) -> Res<()> {
         if self.fechado.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
+        let mut gc = trava(&self.conn);
         let mut primeiro: Option<Erro> = None;
-        let consulta = self.so_consulta.load(Ordering::SeqCst);
-        if !consulta
+        if let Some(conn) = gc.as_ref()
+            && !self.so_consulta.load(Ordering::SeqCst)
             && self.sujo.load(Ordering::SeqCst)
-            && let Err(e) = self.gravar_agora(agora)
+            && let Err(e) = self.gravar_com(conn, agora)
         {
             primeiro.get_or_insert(e);
         }
-        let mut g = trava(&self.lock);
+        let consulta = self.so_consulta.load(Ordering::SeqCst);
+        let mut gl = trava(&self.lock);
         if !consulta
-            && g.is_some()
+            && gl.is_some()
             && let Err(e) = versoes::copia_diaria(&self.caminhos, hoje)
         {
             primeiro.get_or_insert(e);
         }
-        if let Some(l) = g.take()
+        if let Some(l) = gl.take()
             && let Err(e) = l.libertar()
         {
             primeiro.get_or_insert(e);
         }
-        drop(g);
-        *trava(&self.conn) = None;
+        drop(gl);
+        *gc = None;
         primeiro.map_or(Ok(()), Err)
     }
 
@@ -361,30 +530,45 @@ impl Estado {
         }
     }
 
-    /// Cópia manual do estado atual.
+    // ---------- versões ----------
+
+    /// Cópia manual do estado atual (com a mesma verificação de conflito).
     pub fn fazer_copia(&self, agora: NaiveDateTime) -> Res<()> {
         if self.so_consulta.load(Ordering::SeqCst) {
             return Err(erro_so_consulta());
         }
-        self.ler(|c| versoes::copia_manual(c, &self.caminhos, agora))
+        let g = trava(&self.conn);
+        let conn = g.as_ref().ok_or_else(sem_dados)?;
+        if self.alterado_fora() {
+            return Err(self.entrar_em_conflito(conn, agora));
+        }
+        versoes::copia_manual(conn, &self.caminhos, agora).map(|_| ())
     }
 
     pub fn listar_versoes(&self) -> Res<Vec<Versao>> {
         versoes::listar(&self.caminhos)
     }
 
-    /// Repõe uma versão. Em modo normal carrega-a na ligação aberta. Depois de um
-    /// arranque `Corrompido` (sem ligação): adquire o lock, restaura para uma
-    /// ligação vazia em memória (que grava `banco`), e continua o arranque normal
-    /// com `preparar_trabalho`.
+    /// Repõe uma versão. Em modo normal carrega-a na ligação aberta (com cópia de
+    /// segurança do estado atual). Depois de um arranque `Corrompido` (sem
+    /// ligação): adquire o lock, restaura para uma ligação vazia em memória (sem
+    /// cópia de segurança, que seria de uma base vazia), o que grava `banco`, e
+    /// continua o arranque normal com `preparar_trabalho`.
     pub fn restaurar_versao(&self, nome: &str, agora: NaiveDateTime) -> Res<()> {
         if self.so_consulta.load(Ordering::SeqCst) {
             return Err(erro_so_consulta());
         }
         let mut g = trava(&self.conn);
         if let Some(conn) = g.as_mut() {
+            if self.alterado_fora() {
+                return Err(self.entrar_em_conflito(conn, agora));
+            }
             self.marcar();
-            let r = versoes::restaurar(conn, &self.caminhos, nome, agora);
+            let r = versoes::restaurar(conn, &self.caminhos, nome, true, agora);
+            if !self.pendente() {
+                // `restaurar` gravou o banco (o pendente só sai depois de gravar).
+                self.registar_assinatura();
+            }
             match &r {
                 Ok(()) => {
                     self.sujo.store(false, Ordering::SeqCst);
@@ -412,7 +596,7 @@ impl Estado {
         };
         let r = (|| {
             let mut mem = Connection::open_in_memory()?;
-            versoes::restaurar(&mut mem, &self.caminhos, nome, agora)?;
+            versoes::restaurar(&mut mem, &self.caminhos, nome, false, agora)?;
             drop(mem);
             gravacao::preparar_trabalho(&self.caminhos)
         })();
@@ -602,8 +786,11 @@ mod testes {
         assert!(est.so_consulta);
         assert_eq!(
             est.erro.as_deref(),
-            Some("O sistema foi aberto noutro PC (PC-X). Os dados deste PC continuam guardados localmente.")
+            Some("O sistema foi aberto noutro PC (PC-X). As alterações feitas neste PC foram guardadas em Backup (cópia de 20/10 12:00). Feche e volte a abrir o sistema.")
         );
+        // a alteração por gravar ficou numa versão e o pendente foi removido
+        assert_eq!(versao_com(&raiz, "AA-00-AA").as_deref(), Some("frota_2026-10-20_1200.db"));
+        assert!(!e.caminhos().pendente.exists());
         // não grava por cima dos dados do outro PC
         e.tick(s(40));
         let banco = e.caminhos().banco.clone();
@@ -631,11 +818,158 @@ mod testes {
         assert!(v.iter().any(|x| x.nome == "frota_2026-10-20.db"));
         e.restaurar_versao("frota_2026-10-20.db", s(20)).unwrap();
         assert_eq!(e.arranque(), Arranque::Ok);
+        // sem "cópia de segurança" de uma base vazia
+        let nomes: Vec<_> = e.listar_versoes().unwrap().into_iter().map(|v| v.nome).collect();
+        assert_eq!(nomes, vec!["frota_2026-10-20.db"]);
         assert!(raiz.join("dados").join("frota.lock").exists());
         assert_eq!(carros_no_banco(&banco), 1);
         inserir(&e, s(21), "BB-11-BB").unwrap();
         e.tick(s(24));
         assert_eq!(carros_no_banco(&banco), 2);
+    }
+
+    /// Versão (em `dados\versoes`) que contém a matrícula.
+    fn versao_com(raiz: &Path, matricula: &str) -> Option<String> {
+        std::fs::read_dir(raiz.join("dados").join("versoes"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                let c = Connection::open_with_flags(p, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+                c.query_row(
+                    "SELECT COUNT(*) FROM carros WHERE matricula = ?1",
+                    [matricula],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap()
+                    > 0
+            })
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+    }
+
+    fn tem(p: &Path, matricula: &str) -> bool {
+        let c = Connection::open_with_flags(p, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        c.query_row(
+            "SELECT COUNT(*) FROM carros WHERE matricula = ?1",
+            [matricula],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+            > 0
+    }
+
+    const MSG_CONFLITO: &str = "Os dados foram alterados noutro PC. As alterações feitas neste PC foram guardadas em Backup (cópia de ";
+
+    #[test]
+    fn perda_do_lock_nao_sobrescreve_dados_do_outro_pc() {
+        let (_t, raiz, local) = cenario();
+        let banco = raiz.join("dados").join("frota.db");
+        let (a, _) = Estado::arrancar(&raiz, &local.join("a"), "PC-A", t0());
+        inserir(&a, t0(), "A1").unwrap();
+        a.tick(s(3));
+        inserir(&a, s(10), "A2").unwrap(); // por gravar
+        // PC-A deixa de renovar; PC-X assume o lock abandonado, grava e fecha
+        let (x, ax) = Estado::arrancar(&raiz, &local.join("x"), "PC-X", s(200));
+        assert_eq!(ax, Arranque::Ok);
+        inserir(&x, s(200), "X1").unwrap();
+        x.fechar(s(201).date(), s(201)).unwrap();
+        assert!(tem(&banco, "X1"));
+        drop(a); // PC-A "crasha" com a alteração pendente
+        let (a2, r) = Estado::arrancar(&raiz, &local.join("a"), "PC-A", s(300));
+        assert_eq!(r, Arranque::Ok);
+        // o banco continua com os dados do PC-X
+        assert!(tem(&banco, "A1") && tem(&banco, "X1") && !tem(&banco, "A2"));
+        // a alteração do PC-A ficou numa versão
+        assert_eq!(versao_com(&raiz, "A2").as_deref(), Some("frota_2026-10-20_1205.db"));
+        let est = a2.armazenamento();
+        assert_eq!(
+            est.erro.as_deref(),
+            Some(format!("{MSG_CONFLITO}20/10 12:05). Feche e volte a abrir o sistema.").as_str())
+        );
+        assert!(!est.so_consulta);
+        assert!(!local.join("a").join("pendente").exists());
+        // trabalha a partir do banco do PC-X
+        let n: i64 = a2
+            .ler(|c| Ok(c.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn retoma_apos_suspensao_deteta_alteracao_externa() {
+        let (_t, raiz, local) = cenario();
+        let banco = raiz.join("dados").join("frota.db");
+        let (a, _) = Estado::arrancar(&raiz, &local.join("a"), "PC-A", t0());
+        inserir(&a, t0(), "A1").unwrap();
+        a.tick(s(3));
+        inserir(&a, s(10), "A2").unwrap();
+        // PC-A suspenso: sem ticks. PC-X abre, grava e fecha.
+        let (x, _) = Estado::arrancar(&raiz, &local.join("x"), "PC-X", s(200));
+        inserir(&x, s(200), "X1").unwrap();
+        x.fechar(s(201).date(), s(201)).unwrap();
+        a.tick(s(205));
+        let est = a.armazenamento();
+        assert!(est.so_consulta);
+        assert_eq!(
+            est.erro.as_deref(),
+            Some(format!("{MSG_CONFLITO}20/10 12:03). Feche e volte a abrir o sistema.").as_str())
+        );
+        assert!(tem(&banco, "X1") && !tem(&banco, "A2"));
+        assert_eq!(versao_com(&raiz, "A2").as_deref(), Some("frota_2026-10-20_1203.db"));
+        assert!(!local.join("a").join("pendente").exists());
+        assert_eq!(inserir(&a, s(206), "A3").unwrap_err().codigo, "so_consulta");
+        a.fechar(s(207).date(), s(207)).unwrap();
+        assert!(!tem(&banco, "A2"));
+    }
+
+    #[test]
+    fn sem_alteracao_externa_grava_normalmente() {
+        let (_t, raiz, local) = cenario();
+        let banco = raiz.join("dados").join("frota.db");
+        let (a, _) = Estado::arrancar(&raiz, &local, "PC-A", t0());
+        inserir(&a, t0(), "A1").unwrap();
+        a.tick(s(3));
+        inserir(&a, s(10), "A2").unwrap();
+        a.tick(s(13));
+        assert_eq!(carros_no_banco(&banco), 2);
+        // retoma depois de uma pausa longa sem alterações externas
+        a.tick(s(200));
+        inserir(&a, s(201), "A3").unwrap();
+        a.tick(s(204));
+        let est = a.armazenamento();
+        assert!(!est.so_consulta);
+        assert_eq!(est.erro, None);
+        assert_eq!(carros_no_banco(&banco), 3);
+        // pendente no arranque sem alteração externa: grava o trabalho
+        inserir(&a, s(205), "A4").unwrap();
+        drop(a);
+        let (a2, r) = Estado::arrancar(&raiz, &local, "PC-A", s(210));
+        assert_eq!(r, Arranque::Ok);
+        assert_eq!(a2.armazenamento().erro, None);
+        assert_eq!(carros_no_banco(&banco), 4);
+    }
+
+    #[test]
+    fn versao_mais_recente_liberta_lock_e_permite_consulta() {
+        let (_t, raiz, local) = cenario();
+        let dados = raiz.join("dados");
+        std::fs::create_dir_all(&dados).unwrap();
+        let c = Connection::open(dados.join("frota.db")).unwrap();
+        c.execute_batch("CREATE TABLE x(a); PRAGMA user_version = 99;").unwrap();
+        drop(c);
+        let (e, a) = Estado::arrancar(&raiz, &local, "PC-A", t0());
+        assert_eq!(a, Arranque::VersaoMaisRecente);
+        assert!(!dados.join("frota.lock").exists());
+        e.abrir_consulta().unwrap();
+        assert!(e.armazenamento().so_consulta);
+    }
+
+    #[test]
+    fn pasta_inacessivel_da_sem_pasta() {
+        let (t, _raiz, local) = cenario();
+        let raiz = t.path().join("ficheiro");
+        std::fs::write(&raiz, b"nao sou uma pasta").unwrap();
+        let (_e, a) = Estado::arrancar(&raiz, &local, "PC-A", t0());
+        assert!(matches!(a, Arranque::SemPasta { .. }), "{a:?}");
     }
 
     #[test]

@@ -98,6 +98,7 @@ pub fn run() {
             comandos::motorista_guardar,
             comandos::motorista_apagar,
             comandos::atribuir,
+            comandos::atribuicoes_listar,
             comandos::lancar_manutencao,
             comandos::lancar_pneu,
             comandos::lancar_documento,
@@ -126,6 +127,10 @@ pub fn run() {
 
     app.run(|app, event| match event {
         // Síncrono, antes de a janela fechar.
+        // ATENÇÃO: se no futuro o fecho puder ser impedido (`api.prevent_close()`,
+        // p.ex. para pedir confirmação), `fechar` tem de passar para
+        // `ExitRequested`/`WindowEvent::Destroyed`; aqui fecharia os dados de uma
+        // janela que afinal continua aberta.
         RunEvent::WindowEvent {
             event: WindowEvent::CloseRequested { .. },
             ..
