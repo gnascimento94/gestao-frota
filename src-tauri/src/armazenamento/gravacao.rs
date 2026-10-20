@@ -23,21 +23,21 @@ impl Caminhos {
 }
 
 fn corrompido() -> Erro {
-    Erro {
+    Erro { campo: None,
         codigo: "corrompido".into(),
         mensagem: "O ficheiro de dados parece estar danificado. Nada foi alterado; é possível restaurar uma cópia de segurança.".into(),
     }
 }
 
 fn banco_vazio() -> Erro {
-    Erro {
+    Erro { campo: None,
         codigo: "corrompido".into(),
         mensagem: "O ficheiro de dados está vazio ou incompleto. Confirme que a pasta Frota está marcada como \"Disponível offline\" no Google Drive e que a sincronização terminou. Nada foi alterado.".into(),
     }
 }
 
 fn gravacao_falhou(e: impl std::fmt::Display) -> Erro {
-    Erro {
+    Erro { campo: None,
         codigo: "gravacao_falhou".into(),
         mensagem: format!(
             "Não foi possível guardar na pasta de dados. Os dados estão seguros neste computador; vou tentar outra vez. ({e})"

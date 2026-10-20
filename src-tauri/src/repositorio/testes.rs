@@ -1133,3 +1133,69 @@ fn historico_ordenado_por_data() {
     let json = serde_json::to_string(&h[0]).unwrap();
     assert!(json.contains("\"carroId\""));
 }
+
+
+#[test]
+fn erros_de_data_indicam_o_campo() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let base = multa(a, None, "2026-09-01", 6_000, "empresa");
+
+    // pago_em anterior à infração
+    let mut m = base.clone();
+    m.pago_em = Some("2026-08-31".into());
+    let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
+    assert_eq!(e.codigo, "data_invalida");
+    assert_eq!(e.campo.as_deref(), Some("pagoEm"));
+
+    // pago_em no futuro
+    m.pago_em = Some("2026-10-21".into());
+    let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
+    assert_eq!(e.codigo, "data_futura");
+    assert_eq!(e.campo.as_deref(), Some("pagoEm"));
+
+    // cada data da multa indica o seu campo
+    type Campo = fn(&mut MultaInput) -> &mut Option<String>;
+    let campos: [(Campo, &str); 4] = [
+        (|m| &mut m.data_notificacao, "dataNotificacao"),
+        (|m| &mut m.condutor_identificado_em, "condutorIdentificadoEm"),
+        (|m| &mut m.reembolsado_em, "reembolsadoEm"),
+        (|m| &mut m.vencimento, "vencimento"),
+    ];
+    for (campo, nome) in campos {
+        let mut m = base.clone();
+        *campo(&mut m) = Some("2026-13-01".into());
+        let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
+        assert_eq!(e.codigo, "data_invalida");
+        assert_eq!(e.campo.as_deref(), Some(nome));
+    }
+    let mut m = base.clone();
+    m.data_infracao = "2026-10-21".into();
+    let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
+    assert_eq!((e.codigo.as_str(), e.campo.as_deref()), ("data_futura", Some("dataInfracao")));
+
+    // documento: vencimento e pago_em
+    let e = lancar_documento(&mut c, &doc(a, "IUC", 100, "2026-13-01", None), hoje()).unwrap_err();
+    assert_eq!(e.campo.as_deref(), Some("vencimento"));
+    let e = lancar_documento(&mut c, &doc(a, "IUC", 100, "2027-01-01", Some("2026-10-21")), hoje())
+        .unwrap_err();
+    assert_eq!((e.codigo.as_str(), e.campo.as_deref()), ("data_futura", Some("pagoEm")));
+
+    // manutenção: qual dos valores; referência inválida não ganha campo
+    let mut mt = manut(a, "2026-10-01", None);
+    mt.valor_pecas = Some(-1);
+    let e = lancar_manutencao(&mut c, &mt, hoje()).unwrap_err();
+    assert_eq!((e.codigo.as_str(), e.campo.as_deref()), ("valor_invalido", Some("valorPecas")));
+    let mut m = base.clone();
+    m.carro_id = 999;
+    let e = guardar_multa(&mut c, &m, hoje()).unwrap_err();
+    assert_eq!((e.codigo.as_str(), e.campo), ("referencia_invalida", None));
+}
+
+#[test]
+fn erro_sem_campo_nao_serializa_campo() {
+    let e = crate::repositorio::erro("so_consulta", "Só consulta.");
+    assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"codigo":"so_consulta","mensagem":"Só consulta."}"#);
+    let e = e.com_campo("pagoEm");
+    assert!(serde_json::to_string(&e).unwrap().contains(r#""campo":"pagoEm""#));
+}

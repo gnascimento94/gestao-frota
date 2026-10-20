@@ -6,6 +6,7 @@ import { Campo, CampoSelecao } from '../ui/Campo'
 import { parseEuros } from '../util/formato'
 import {
   MSG_CARRO,
+  arrumarErros,
   erroData,
   erroEuros,
   erroKm,
@@ -71,7 +72,7 @@ export function FormPneu({ carro, seletor, focoNoFormulario, onLancado, onCancel
     }))
   }
 
-  const erros = { ...validar(l.tentou), ...l.erros }
+  const erros: Erros = { ...validar(l.tentou), ...arrumarErros(l.erros, ['carro', 'data', 'km', 'valor']) }
 
   return (
     <form className="form" onSubmit={submeter} noValidate>

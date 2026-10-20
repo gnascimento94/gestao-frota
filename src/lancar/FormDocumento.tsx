@@ -6,7 +6,7 @@ import { Campo } from '../ui/Campo'
 import { parseEuros } from '../util/formato'
 import {
   MSG_CARRO,
-  campoDaData,
+  arrumarErros,
   erroData,
   erroEuros,
   erroFuturo,
@@ -67,12 +67,10 @@ export function FormDocumento({ carro, seletor, focoNoFormulario, onLancado, onC
     }))
   }
 
-  const erros: Erros = { ...validar(l.tentou), ...l.erros }
-  // Erros de data do núcleo: no campo cuja data a mensagem refere; senão no pagamento
-  // (se indicado, é o único que não pode ser futuro) ou no vencimento.
-  if (l.erros.data) {
-    const alvo = campoDaData(l.erros.data, { vencimento, pagoEm }) ?? (pagoEm ? 'pagoEm' : 'vencimento')
-    erros[alvo] = l.erros.data
+  // Erros do núcleo: no campo indicado (`campo`: vencimento ou pagoEm); sem campo, no vencimento.
+  const erros: Erros = {
+    ...validar(l.tentou),
+    ...arrumarErros(l.erros, ['carro', 'valor', 'vencimento', 'pagoEm'], { data: 'vencimento' }),
   }
 
   return (

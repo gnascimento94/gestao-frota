@@ -83,7 +83,7 @@ fn trava<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn erro(codigo: &str, mensagem: impl Into<String>) -> Erro {
-    Erro { codigo: codigo.into(), mensagem: mensagem.into() }
+    Erro { campo: None, codigo: codigo.into(), mensagem: mensagem.into() }
 }
 
 fn erro_so_consulta() -> Erro {

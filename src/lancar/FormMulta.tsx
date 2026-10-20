@@ -6,7 +6,7 @@ import { Campo, CampoSelecao } from '../ui/Campo'
 import { formatarEuros, parseEuros } from '../util/formato'
 import {
   MSG_CARRO,
-  campoDaData,
+  arrumarErros,
   erroData,
   erroEuros,
   erroFormatoData,
@@ -38,8 +38,6 @@ const QUEM_PAGA = [
 
 const DATA_COMPLETA = /^\d{4}-\d{2}-\d{2}$/
 const MSG_COPART = 'A parte da empresa tem de ser maior que 0 e menor que o valor da multa.'
-/** Mesma mensagem que o núcleo devolve (`data_invalida`). */
-const MSG_PAGO_ANTES = 'O pagamento não pode ser anterior à infração.'
 
 /**
  * Multa: o condutor é sugerido pela atribuição do carro na data da infração (editável ou
@@ -161,11 +159,13 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
       valor: erroEuros(valor, true, tentou),
       valorEmpresa: erroEmpresa(tentou),
       dataNotificacao: erroFuturo(dataNotificacao),
-      identificadoEm: erroFuturo(identificadoEm),
+      condutorIdentificadoEm: erroFuturo(identificadoEm),
       vencimento: erroFormatoData(vencimento),
       pagoEm:
         erroFuturo(pagoEm) ??
-        (!vazio(pagoEm) && !vazio(dataInfracao) && pagoEm < dataInfracao ? MSG_PAGO_ANTES : undefined),
+        (!vazio(pagoEm) && !vazio(dataInfracao) && pagoEm < dataInfracao
+          ? 'O pagamento não pode ser anterior à infração.'
+          : undefined),
     }
   }
 
@@ -189,16 +189,25 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
     }))
   }
 
-  const erros: Erros = { ...validar(l.tentou), ...l.erros }
-  // Erros de data do núcleo: no campo cuja data a mensagem refere; pagamento antes da infração
-  // vai para "Paga em"; senão, para a data da infração (a data principal).
-  if (l.erros.data) {
-    const alvo =
-      l.erros.data === MSG_PAGO_ANTES
-        ? 'pagoEm'
-        : (campoDaData(l.erros.data, { dataInfracao, dataNotificacao, vencimento, identificadoEm, pagoEm }) ??
-          'dataInfracao')
-    erros[alvo] = l.erros.data
+  // Erros do núcleo: no campo que o núcleo indica (`campo`); um erro de data sem campo vai para a
+  // data da infração; o que não tem campo visível (ex.: reembolsadoEm) vai para a faixa.
+  const erros: Erros = {
+    ...validar(l.tentou),
+    ...arrumarErros(
+      l.erros,
+      [
+        'carro',
+        'dataInfracao',
+        'dataNotificacao',
+        'condutorIdentificadoEm',
+        'vencimento',
+        'pagoEm',
+        'pontos',
+        'valor',
+        ...(copart ? ['valorEmpresa'] : []),
+      ],
+      { data: 'dataInfracao' },
+    ),
   }
 
   // Motoristas ativos, mais o escolhido/sugerido se estiver inativo.
@@ -298,7 +307,7 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
             value={identificadoEm}
             max={hoje()}
             onChange={(e) => setIdentificadoEm(e.target.value)}
-            erro={erros.identificadoEm}
+            erro={erros.condutorIdentificadoEm}
           />
           <Campo
             rotulo="Paga em"

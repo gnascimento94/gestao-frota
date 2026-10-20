@@ -6,6 +6,7 @@ import { Campo, CampoSelecao } from '../ui/Campo'
 import { formatarEuros, parseEuros } from '../util/formato'
 import {
   MSG_CARRO,
+  arrumarErros,
   erroData,
   erroEuros,
   erroKm,
@@ -84,8 +85,8 @@ export function FormManutencao({ carro, seletor, focoNoFormulario, onLancado, on
         : soTotal
           ? erroEuros(total, true, tentou)
           : undefined,
-      pecas: discriminado ? erroEuros(pecas, true, tentou) : undefined,
-      maoObra: discriminado ? erroEuros(maoObra, true, tentou) : undefined,
+      valorPecas: discriminado ? erroEuros(pecas, true, tentou) : undefined,
+      valorMaoObra: discriminado ? erroEuros(maoObra, true, tentou) : undefined,
     }
   }
 
@@ -110,7 +111,16 @@ export function FormManutencao({ carro, seletor, focoNoFormulario, onLancado, on
     }))
   }
 
-  const erros = { ...validar(l.tentou), ...l.erros }
+  // Erros do núcleo no campo indicado (valor, valorPecas, valorMaoObra…); em "Nós" as peças são
+  // o próprio valor; o que não estiver à vista vai para a faixa.
+  const erros: Erros = {
+    ...validar(l.tentou),
+    ...arrumarErros(
+      l.erros,
+      ['carro', 'data', 'tipo', 'km', 'oficina', 'valor', ...(discriminado ? ['valorPecas', 'valorMaoObra'] : [])],
+      naOficina ? {} : { valorPecas: 'valor' },
+    ),
+  }
 
   return (
     <form className="form" onSubmit={submeter} noValidate>
@@ -199,7 +209,7 @@ export function FormManutencao({ carro, seletor, focoNoFormulario, onLancado, on
                     inputMode="decimal"
                     value={pecas}
                     onChange={(e) => setPecas(e.target.value)}
-                    erro={erros.pecas}
+                    erro={erros.valorPecas}
                     autoComplete="off"
                   />
                   <Campo
@@ -207,7 +217,7 @@ export function FormManutencao({ carro, seletor, focoNoFormulario, onLancado, on
                     inputMode="decimal"
                     value={maoObra}
                     onChange={(e) => setMaoObra(e.target.value)}
-                    erro={erros.maoObra}
+                    erro={erros.valorMaoObra}
                     autoComplete="off"
                   />
                 </div>

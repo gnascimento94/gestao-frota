@@ -800,11 +800,13 @@ time {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 8px;
 }
 
-/* Espaço só entre zonas com um toast visível (as vazias continuam no DOM como regiões "live"). */
-.zona-toasts > :not(:empty) ~ :not(:empty) {
-  margin-top: 8px;
+/* Zonas vazias saem do fluxo (o `gap` só fica entre toasts visíveis), mas continuam no DOM e
+   visíveis para a árvore de acessibilidade como regiões "live" — por isso não `display: none`. */
+.zona-toasts > :empty {
+  position: absolute;
 }
 
 .desfazer-zona {

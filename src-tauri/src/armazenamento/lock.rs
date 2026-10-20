@@ -45,7 +45,7 @@ fn fresco(agora: DateTime<Utc>, hora: DateTime<Utc>) -> bool {
 }
 
 fn bloqueado(pc: impl Into<String>) -> Erro {
-    Erro { codigo: "bloqueado".into(), mensagem: pc.into() }
+    Erro { campo: None, codigo: "bloqueado".into(), mensagem: pc.into() }
 }
 
 /// Lock ilegível (lixo ou erro de leitura): aplica a regra dos 120 s à data de

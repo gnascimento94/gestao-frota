@@ -1,7 +1,7 @@
 use crate::erro::{Erro, Res};
 
 fn invalida() -> Erro {
-    Erro {
+    Erro { campo: None,
         codigo: "matricula_invalida".into(),
         mensagem: "Matrícula inválida. Exemplo: AA-12-BB".into(),
     }

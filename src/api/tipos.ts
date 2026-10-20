@@ -2,7 +2,12 @@
 // Dinheiro: inteiros em cêntimos. Datas: "AAAA-MM-DD" (strings).
 // Campos `Option` do Rust chegam como `null`; nos inputs podem ser omitidos.
 
-export type ErroApi = { codigo: string; mensagem: string }
+export type ErroApi = {
+  codigo: string
+  mensagem: string
+  /** Campo do input (camelCase) a que o erro se refere, quando o código não chega para o saber. */
+  campo?: string
+}
 
 // ---------- armazenamento ----------
 

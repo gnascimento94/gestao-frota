@@ -14,7 +14,7 @@ pub fn migrar(conn: &mut Connection) -> Res<()> {
 pub fn migrar_com(conn: &mut Connection, migracoes: &[&str]) -> Res<()> {
     let atual = versao_esquema(conn)?;
     if atual > migracoes.len() as i64 {
-        return Err(Erro {
+        return Err(Erro { campo: None,
             codigo: "versao_mais_recente".into(),
             mensagem: "Estes dados foram criados por uma versão mais recente do programa. Atualize o programa antes de os abrir.".into(),
         });

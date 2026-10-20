@@ -6,7 +6,7 @@ import type { Carro, HistoricoItem, Motorista, MultaItem, Relatorio } from '../a
 import { DesfazerProvider } from '../ui/Desfazer'
 import { InicioOuBoasVindas } from './BoasVindas'
 import { Carros } from './Carros'
-import { campoDoErro } from './comum'
+import { campoDoErro, chaveDoErro, paraErroApi } from './comum'
 import { Motoristas } from './Motoristas'
 import { FichaCarro } from './FichaCarro'
 
@@ -194,6 +194,13 @@ describe('mapa de erros', () => {
     expect(campoDoErro('data_saida_invalida')).toBe('dataSaida')
     expect(campoDoErro('data_invalida')).toBe('data')
     expect(campoDoErro('referencia_invalida')).toBe('geral')
+  })
+
+  test('o campo indicado pelo núcleo tem prioridade sobre o mapa por código', () => {
+    const e = paraErroApi({ codigo: 'data_futura', mensagem: 'x', campo: 'pagoEm' })
+    expect(e.campo).toBe('pagoEm')
+    expect(chaveDoErro(e)).toBe('pagoEm')
+    expect(chaveDoErro(paraErroApi({ codigo: 'data_futura', mensagem: 'x' }))).toBe('data')
   })
 })
 

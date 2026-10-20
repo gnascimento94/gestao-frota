@@ -267,11 +267,11 @@ pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
 }
 
 fn versao_invalida() -> Erro {
-    Erro { codigo: "versao_invalida".into(), mensagem: "Versão inválida.".into() }
+    Erro { campo: None, codigo: "versao_invalida".into(), mensagem: "Versão inválida.".into() }
 }
 
 fn corrompida() -> Erro {
-    Erro {
+    Erro { campo: None,
         codigo: "corrompido".into(),
         mensagem: "A versão escolhida parece estar danificada. Nada foi alterado.".into(),
     }
@@ -316,7 +316,7 @@ pub fn restaurar(
     // versão criada por uma app mais recente: não a carregamos
     let uv: i64 = origem_conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if uv > MIGRACOES.len() as i64 {
-        return Err(Erro {
+        return Err(Erro { campo: None,
             codigo: "versao_mais_recente".into(),
             mensagem: "Esta versão foi criada por uma versão mais recente da aplicação. Nada foi alterado.".into(),
         });
@@ -334,7 +334,7 @@ pub fn restaurar(
     }
     drop(origem_conn);
     if !integridade_ok(conn)? {
-        return Err(Erro {
+        return Err(Erro { campo: None,
             codigo: "corrompido".into(),
             mensagem: "A restauração não passou a verificação de integridade.".into(),
         });

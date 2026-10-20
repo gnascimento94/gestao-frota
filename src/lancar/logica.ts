@@ -70,15 +70,27 @@ export function erroFormatoData(texto: string): string | undefined {
   return !vazio(texto) && !/^\d{4}-\d{2}-\d{2}$/.test(texto.trim()) ? 'Data inválida.' : undefined
 }
 
-/**
- * Campo a que se refere um erro de data do núcleo: o primeiro cuja data aparece na mensagem
- * (por exemplo "Data inválida: 2026-13-01."); `undefined` se nenhum aparecer.
- */
-export function campoDaData(mensagem: string, campos: Record<string, string>): string | undefined {
-  return Object.entries(campos).find(([, valor]) => !vazio(valor) && mensagem.includes(valor.trim()))?.[0]
-}
+export const temErros = (e: Erros) => Object.values(e).some(Boolean)
 
-export const temErros =(e: Erros) => Object.values(e).some(Boolean)
+/**
+ * Erros do núcleo prontos a mostrar. A chave é o `campo` indicado pelo núcleo (ou o mapa
+ * `campoDoErro`); `aliases` traduz chaves genéricas para o campo deste formulário (ex.: `data` →
+ * `dataInfracao`). O que não corresponder a um campo visível vai para a faixa (`geral`).
+ */
+export function arrumarErros(
+  erros: Erros,
+  visiveis: readonly string[],
+  aliases: Partial<Record<string, string>> = {},
+): Erros {
+  const r: Erros = {}
+  for (const [chave, msg] of Object.entries(erros)) {
+    if (!msg) continue
+    const alvo = aliases[chave] ?? chave
+    if (visiveis.includes(alvo)) r[alvo] = msg
+    else r.geral ??= msg
+  }
+  return r
+}
 
 /** `''` → `null`, senão o texto sem espaços nas pontas. */
 export const textoOuNulo = (t: string) => t.trim() || null

@@ -21,8 +21,10 @@ export function normalizar(texto: string): string {
 /** Converte o que foi rejeitado por um comando num `ErroApi`. */
 export function paraErroApi(e: unknown): ErroApi {
   if (e && typeof e === 'object' && 'codigo' in e && 'mensagem' in e) {
-    const { codigo, mensagem } = e as ErroApi
-    return { codigo: String(codigo), mensagem: String(mensagem) }
+    const { codigo, mensagem, campo } = e as ErroApi
+    const r: ErroApi = { codigo: String(codigo), mensagem: String(mensagem) }
+    if (typeof campo === 'string' && campo) r.campo = campo
+    return r
   }
   return { codigo: 'desconhecido', mensagem: typeof e === 'string' ? e : 'Ocorreu um erro inesperado.' }
 }
@@ -56,11 +58,17 @@ export function campoDoErro(codigo: string): CampoErro {
   return 'geral' // referencia_invalida, so_consulta, …
 }
 
-export type ErrosCampos = Partial<Record<CampoErro, string>>
+/** Erros por campo: chaves de `CampoErro` ou o `campo` (camelCase do input) indicado pelo núcleo. */
+export type ErrosCampos = Partial<Record<CampoErro | (string & {}), string>>
+
+/** Campo de um erro: o que o núcleo indica (`campo`), senão o mapa `campoDoErro(codigo)`. */
+export function chaveDoErro(e: ErroApi): string {
+  return e.campo ?? campoDoErro(e.codigo)
+}
 
 export function errosDe(e: unknown): ErrosCampos {
-  const { codigo, mensagem } = paraErroApi(e)
-  return { [campoDoErro(codigo)]: mensagem }
+  const api = paraErroApi(e)
+  return { [chaveDoErro(api)]: api.mensagem }
 }
 
 /**

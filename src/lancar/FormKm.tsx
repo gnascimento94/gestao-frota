@@ -5,6 +5,7 @@ import { hoje } from '../ecras/comum'
 import { Campo } from '../ui/Campo'
 import {
   MSG_CARRO,
+  arrumarErros,
   erroData,
   erroKm,
   lerKm,
@@ -37,7 +38,7 @@ export function FormKm({ carro, seletor, focoNoFormulario, onLancado, onCancelar
     l.tentar(validar, () => ({ carroId: carro!.id, data, km: lerKm(km)!, confirmado: false }))
   }
 
-  const erros = { ...validar(l.tentou), ...l.erros }
+  const erros: Erros = { ...validar(l.tentou), ...arrumarErros(l.erros, ['carro', 'data', 'km']) }
 
   return (
     <form className="form" onSubmit={submeter} noValidate>

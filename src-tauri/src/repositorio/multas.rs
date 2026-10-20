@@ -3,7 +3,7 @@ use super::{
     Tabela, data, data_opt, erro, existe, fmt_data, nao_encontrado, nao_futura, opcao, texto,
     validar_data_carro, validar_valor,
 };
-use crate::erro::Res;
+use crate::erro::{DataNoCampo, Res};
 use crate::regras::gastos::motorista_em;
 use chrono::{Months, NaiveDate};
 use rusqlite::{Connection, params};
@@ -157,17 +157,27 @@ fn passada(s: &Option<String>, hoje: NaiveDate) -> Res<Option<NaiveDate>> {
 
 /// Cria (`id: None`) ou altera uma multa. `valor_empresa` é calculado salvo em `coparticipado`.
 pub fn guardar_multa(conn: &mut Connection, m: &MultaInput, hoje: NaiveDate) -> Res<i64> {
-    let infracao_dia = data(&m.data_infracao)?;
-    let notificacao = passada(&m.data_notificacao, hoje)?.map(fmt_data);
-    let identificado = passada(&m.condutor_identificado_em, hoje)?.map(fmt_data);
-    let vencimento = data_opt(&m.vencimento)?.map(fmt_data);
-    let pago_dia = passada(&m.pago_em, hoje)?;
-    let reembolsado = passada(&m.reembolsado_em, hoje)?.map(fmt_data);
+    // Cada erro de data diz a que campo do input se refere (`campo`, em camelCase).
+    let infracao_dia = data(&m.data_infracao).data_no_campo("dataInfracao")?;
+    let notificacao = passada(&m.data_notificacao, hoje)
+        .data_no_campo("dataNotificacao")?
+        .map(fmt_data);
+    let identificado = passada(&m.condutor_identificado_em, hoje)
+        .data_no_campo("condutorIdentificadoEm")?
+        .map(fmt_data);
+    let vencimento = data_opt(&m.vencimento)
+        .data_no_campo("vencimento")?
+        .map(fmt_data);
+    let pago_dia = passada(&m.pago_em, hoje).data_no_campo("pagoEm")?;
+    let reembolsado = passada(&m.reembolsado_em, hoje)
+        .data_no_campo("reembolsadoEm")?
+        .map(fmt_data);
     if pago_dia.is_some_and(|p| p < infracao_dia) {
         return Err(erro(
             "data_invalida",
             "O pagamento não pode ser anterior à infração.",
-        ));
+        )
+        .com_campo("pagoEm"));
     }
     let pago = pago_dia.map(fmt_data);
     validar_valor(m.valor)?;
@@ -203,7 +213,7 @@ pub fn guardar_multa(conn: &mut Connection, m: &MultaInput, hoje: NaiveDate) -> 
         },
     };
     let tx = conn.transaction()?;
-    validar_data_carro(&tx, m.carro_id, infracao_dia, hoje)?;
+    validar_data_carro(&tx, m.carro_id, infracao_dia, hoje).data_no_campo("dataInfracao")?;
     if let Some(mot) = m.motorista_id {
         existe(&tx, Tabela::Motoristas, mot)?;
     }

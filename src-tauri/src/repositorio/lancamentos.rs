@@ -1,8 +1,8 @@
-﻿use super::{
+use super::{
     Tabela, data, data_opt, erro, existe, fmt_data, inserir_leitura, nao_encontrado, nao_futura,
     opcao, texto, validar_data_carro, validar_km, validar_valor,
 };
-use crate::erro::Res;
+use crate::erro::{DataNoCampo, Res};
 use crate::regras::documentos::proximo_anual;
 use chrono::NaiveDate;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -79,11 +79,15 @@ pub(crate) fn nome_documento(tipo: &str) -> &'static str {
 
 pub fn lancar_manutencao(conn: &mut Connection, m: &ManutencaoInput, hoje: NaiveDate) -> Res<i64> {
     let dia = data(&m.data)?;
-    for v in [Some(m.valor), m.valor_pecas, m.valor_mao_obra]
-        .into_iter()
-        .flatten()
-    {
-        validar_valor(v)?;
+    // Três valores podem ser inválidos: `campo` diz qual.
+    for (v, campo) in [
+        (Some(m.valor), "valor"),
+        (m.valor_pecas, "valorPecas"),
+        (m.valor_mao_obra, "valorMaoObra"),
+    ] {
+        if let Some(v) = v {
+            validar_valor(v).map_err(|e| e.com_campo(campo))?;
+        }
     }
     let por = opcao(
         &m.executada_por,
@@ -110,7 +114,8 @@ pub fn lancar_manutencao(conn: &mut Connection, m: &ManutencaoInput, hoje: Naive
         return Err(erro(
             "mao_obra_propria",
             "Numa manutenção feita por nós a mão de obra é 0.",
-        ));
+        )
+        .com_campo("valorMaoObra"));
     }
     if let (Some(p), Some(o)) = (pecas, mao)
         && p + o != m.valor
@@ -252,10 +257,11 @@ pub fn lancar_documento(conn: &mut Connection, d: &DocumentoInput, hoje: NaiveDa
         "tipo_invalido",
         "Tipo de documento inválido.",
     )?;
-    let vencimento = data(&d.vencimento)?;
-    let pago = data_opt(&d.pago_em)?;
+    // Duas datas: cada erro diz a que campo se refere.
+    let vencimento = data(&d.vencimento).data_no_campo("vencimento")?;
+    let pago = data_opt(&d.pago_em).data_no_campo("pagoEm")?;
     if let Some(p) = pago {
-        nao_futura(p, hoje)?;
+        nao_futura(p, hoje).data_no_campo("pagoEm")?;
     }
     let tx = conn.transaction()?;
     existe(&tx, Tabela::Carros, d.carro_id)?;

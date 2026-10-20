@@ -385,16 +385,59 @@ test('multa: pagamento antes da infração aparece em "Paga em" e não envia', a
   expect(m.guardarMulta).not.toHaveBeenCalled()
 })
 
-test('multa: erro de data do núcleo vai para o campo cuja data refere (prazo)', async () => {
-  m.guardarMulta.mockRejectedValue({ codigo: 'data_invalida', mensagem: 'Data inválida: 2026-11-30.' })
+test("multa: erro do núcleo com campo 'vencimento' vai para o Prazo de pagamento", async () => {
+  m.guardarMulta.mockRejectedValue({ codigo: 'data_invalida', mensagem: 'Data inválida.', campo: 'vencimento' })
   const { user } = await abrir('Multa')
   fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
-  fireEvent.change(screen.getByLabelText('Prazo de pagamento'), { target: { value: '2026-11-30' } })
   await user.type(screen.getByLabelText('Valor da multa (€)'), '60')
   await user.click(lancar())
-  expect(await screen.findByText('Data inválida: 2026-11-30.')).toBeTruthy()
+  expect(await screen.findByText('Data inválida.')).toBeTruthy()
   expect(screen.getByLabelText('Prazo de pagamento').getAttribute('aria-invalid')).toBe('true')
   expect(dataInfracao().getAttribute('aria-invalid')).toBeNull()
+})
+
+test("multa: erro do núcleo com campo 'pagoEm' vai para Paga em; sem campo, para a data da infração", async () => {
+  m.guardarMulta
+    .mockRejectedValueOnce({ codigo: 'data_futura', mensagem: 'A data não pode ser no futuro.', campo: 'pagoEm' })
+    .mockRejectedValueOnce({ codigo: 'data_antes_aquisicao', mensagem: 'A data é anterior à data de aquisição do carro.' })
+  const { user } = await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  await user.type(screen.getByLabelText('Valor da multa (€)'), '60')
+  await user.click(lancar())
+  expect(await screen.findByText('A data não pode ser no futuro.')).toBeTruthy()
+  expect(screen.getByLabelText('Paga em').getAttribute('aria-invalid')).toBe('true')
+  await user.click(lancar())
+  expect(await screen.findByText('A data é anterior à data de aquisição do carro.')).toBeTruthy()
+  expect(dataInfracao().getAttribute('aria-invalid')).toBe('true')
+})
+
+test('erro do núcleo num campo que o formulário não mostra vai para a faixa', async () => {
+  m.guardarMulta.mockRejectedValue({ codigo: 'data_futura', mensagem: 'A data não pode ser no futuro.', campo: 'reembolsadoEm' })
+  const { user } = await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  await user.type(screen.getByLabelText('Valor da multa (€)'), '60')
+  await user.click(lancar())
+  expect((await screen.findByRole('alert')).textContent).toBe('A data não pode ser no futuro.')
+})
+
+test("manutenção: erro do núcleo com campo 'valorMaoObra' vai para Mão de obra", async () => {
+  m.lancarManutencao.mockRejectedValue({ codigo: 'valor_invalido', mensagem: 'O valor não pode ser negativo.', campo: 'valorMaoObra' })
+  const { user } = await abrir()
+  await manutencaoNaOficina(user)
+  await user.click(lancar())
+  expect(await screen.findByText('O valor não pode ser negativo.')).toBeTruthy()
+  expect(screen.getByLabelText('Mão de obra (€)').getAttribute('aria-invalid')).toBe('true')
+})
+
+test("documento: erro do núcleo com campo 'pagoEm' vai para Pago em", async () => {
+  m.lancarDocumento.mockRejectedValue({ codigo: 'data_futura', mensagem: 'A data não pode ser no futuro.', campo: 'pagoEm' })
+  const { user } = await abrir('Documento/taxa')
+  await user.type(screen.getByLabelText('Valor (€)'), '35')
+  fireEvent.change(screen.getByLabelText('Vencimento'), { target: { value: '2026-11-30' } })
+  await user.click(lancar())
+  expect(await screen.findByText('A data não pode ser no futuro.')).toBeTruthy()
+  expect(screen.getByLabelText('Pago em').getAttribute('aria-invalid')).toBe('true')
+  expect(screen.getByLabelText('Vencimento').getAttribute('aria-invalid')).toBeNull()
 })
 
 test("documento envia tipo 'inspecao' e pagoEm null quando não foi pago", async () => {
