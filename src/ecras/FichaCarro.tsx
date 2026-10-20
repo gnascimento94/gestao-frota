@@ -54,12 +54,14 @@ interface Dados {
 interface FichaProps {
   id: number
   ano: number
+  /** Muda após cada lançamento (folha Lançar): os dados voltam a ser pedidos. */
+  versao?: number
   onNavegar(e: Ecra): void
   /** Abre a folha "Lançar" existente, indicando o carro de origem. */
   onLancar(origem: DOMRect | null, carroId?: number): void
 }
 
-export function FichaCarro({ id, ano, onNavegar, onLancar }: FichaProps) {
+export function FichaCarro({ id, ano, versao = 0, onNavegar, onLancar }: FichaProps) {
   const [separador, setSeparador] = useState<Separador>('historico')
   const [editar, setEditar] = useState<{ aberta: boolean; origem: DOMRect | null }>({
     aberta: false,
@@ -88,7 +90,7 @@ export function FichaCarro({ id, ano, onNavegar, onLancar }: FichaProps) {
       motoristas,
     }
   }, [id, ano])
-  const { dados, erro, recarregar } = useCarregar(buscar)
+  const { dados, erro, recarregar } = useCarregar(buscar, versao)
 
   if (erro && !dados) {
     return (

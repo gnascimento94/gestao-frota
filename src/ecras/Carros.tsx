@@ -154,19 +154,21 @@ export function FormCarro({ carro, onGuardado, onCancelar }: FormCarroProps) {
 
 interface CarrosProps {
   ano: number
+  /** Muda após cada lançamento (folha Lançar): os dados voltam a ser pedidos. */
+  versao?: number
   /** Texto da pesquisa global (matrícula, marca ou modelo). */
   pesquisa: string
   onAbrir(id: number): void
 }
 
-export function Carros({ ano, pesquisa, onAbrir }: CarrosProps) {
+export function Carros({ ano, versao = 0, pesquisa, onAbrir }: CarrosProps) {
   const [mostrarTodos, setMostrarTodos] = useState(false)
   const [folha, setFolha] = useState<{ aberta: boolean; origem: DOMRect | null }>({
     aberta: false,
     origem: null,
   })
   const buscar = useCallback(() => carrosListar(!mostrarTodos, ano), [mostrarTodos, ano])
-  const { dados, erro, recarregar } = useCarregar(buscar)
+  const { dados, erro, recarregar } = useCarregar(buscar, versao)
 
   const visiveis = useMemo(() => {
     const q = normalizar(pesquisa)

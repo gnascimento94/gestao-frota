@@ -57,6 +57,7 @@ function Concha() {
   const fecharLancar = useCallback(() => setLancar((l) => ({ ...l, aberta: false })), [])
   const [versao, setVersao] = useState(0)
   const recarregar = useCallback(() => setVersao((v) => v + 1), [])
+  const [zonaToasts, setZonaToasts] = useState<HTMLDivElement | null>(null)
 
   // Atalhos globais: Ctrl+N (lançar), Ctrl+K (pesquisar). Esc é tratado pela folha.
   useEffect(() => {
@@ -131,17 +132,30 @@ function Concha() {
 
         <Aviso {...gravacao} />
 
-        {/* `versao` muda após cada lançamento: o ecrã visível volta a carregar os dados. */}
-        <div className="conteudo" key={versao}>
+        {/* `versao` muda após cada lançamento: o ecrã visível volta a pedir os dados
+            (sem remontar: separador, filtros, scroll e foco mantêm-se). */}
+        <div className="conteudo">
           {ecra.nome === 'carros' && (
-            <Carros ano={ano} pesquisa={pesquisa} onAbrir={(id) => navegar({ nome: 'carro', id })} />
+            <Carros
+              ano={ano}
+              versao={versao}
+              pesquisa={pesquisa}
+              onAbrir={(id) => navegar({ nome: 'carro', id })}
+            />
           )}
           {ecra.nome === 'carro' && (
-            <FichaCarro key={ecra.id} id={ecra.id} ano={ano} onNavegar={navegar} onLancar={abrirLancar} />
+            <FichaCarro
+              key={ecra.id}
+              id={ecra.id}
+              ano={ano}
+              versao={versao}
+              onNavegar={navegar}
+              onLancar={abrirLancar}
+            />
           )}
-          {ecra.nome === 'motoristas' && <Motoristas ano={ano} />}
+          {ecra.nome === 'motoristas' && <Motoristas ano={ano} versao={versao} />}
           {ecra.nome === 'inicio' && (
-            <InicioOuBoasVindas ano={ano} onNavegar={navegar}>
+            <InicioOuBoasVindas ano={ano} versao={versao} onNavegar={navegar}>
               <EcraVazio titulo={titulo} />
             </InicioOuBoasVindas>
           )}
@@ -157,9 +171,13 @@ function Concha() {
         carroId={lancar.carroId}
         onFechar={fecharLancar}
         onLancado={recarregar}
+        zonaToasts={zonaToasts}
       />
 
-      <Desfazer />
+      {/* Toasts empilhados: "Lançado ✓" (portal da folha Lançar) e "Desfazer". */}
+      <div className="zona-toasts" ref={setZonaToasts}>
+        <Desfazer />
+      </div>
     </div>
   )
 }

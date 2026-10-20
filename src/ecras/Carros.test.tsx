@@ -263,3 +263,39 @@ describe('Motoristas', () => {
     expect(await screen.findByText('Falhou a leitura do relatório.')).toBeTruthy()
   })
 })
+
+describe('recarregar após lançar (versao)', () => {
+  test('versao nova volta a pedir os carros sem perder o filtro', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<Carros ano={2026} versao={0} pesquisa="" onAbrir={() => {}} />)
+    await screen.findByText('AA-12-BB')
+    await user.click(screen.getByLabelText('Mostrar inativos/vendidos'))
+    await waitFor(() => expect(m.carrosListar).toHaveBeenLastCalledWith(false, 2026))
+    const chamadas = m.carrosListar.mock.calls.length
+    m.carrosListar.mockResolvedValue([carro(1, 'AA-12-BB'), carro(3, 'EE-56-FF')])
+    rerender(<Carros ano={2026} versao={1} pesquisa="" onAbrir={() => {}} />)
+    expect(await screen.findByText('EE-56-FF')).toBeTruthy()
+    expect(m.carrosListar.mock.calls.length).toBe(chamadas + 1)
+    expect(m.carrosListar).toHaveBeenLastCalledWith(false, 2026)
+    expect((screen.getByLabelText('Mostrar inativos/vendidos') as HTMLInputElement).checked).toBe(true)
+  })
+
+  test('na ficha, versao nova recarrega e mantém o separador escolhido', async () => {
+    const user = userEvent.setup()
+    m.carroObter.mockResolvedValue(carro(1, 'AA-12-BB'))
+    const ficha = (versao: number) => (
+      <DesfazerProvider aoFecharJanela={() => () => {}}>
+        <FichaCarro id={1} ano={2026} versao={versao} onNavegar={() => {}} onLancar={() => {}} />
+      </DesfazerProvider>
+    )
+    const { rerender } = render(ficha(0))
+    await screen.findByRole('heading', { name: /AA-12-BB/ })
+    const separador = screen.getAllByRole('tab')[1]
+    await user.click(separador)
+    expect(separador.getAttribute('aria-selected')).toBe('true')
+    const chamadas = m.carroObter.mock.calls.length
+    rerender(ficha(1))
+    await waitFor(() => expect(m.carroObter.mock.calls.length).toBe(chamadas + 1))
+    expect(screen.getAllByRole('tab')[1].getAttribute('aria-selected')).toBe('true')
+  })
+})

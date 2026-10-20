@@ -108,8 +108,10 @@ export function SeletorCarro({
 
   function mudar(v: string) {
     setTexto(v)
-    const q = normalizar(v.split('·')[0])
-    const exato = q ? carros.find((c) => normalizar(c.matricula) === q) : undefined
+    // Valor escolhido na lista (rótulo completo, com ou sem "·" e estado) ou matrícula escrita.
+    const doRotulo = carros.find((c) => rotuloCarro(c) === v.trim())
+    const q = normalizar(v.split(/[·(]/)[0])
+    const exato = doRotulo ?? (q ? carros.find((c) => normalizar(c.matricula) === q) : undefined)
     const parecidos = q.length >= 2 ? carros.filter((c) => normalizar(c.matricula).includes(q)) : []
     const escolhido = exato ?? (parecidos.length === 1 ? parecidos[0] : null)
     setCandidatos(parecidos.length)

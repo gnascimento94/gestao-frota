@@ -6,8 +6,10 @@ import { Campo, CampoSelecao } from '../ui/Campo'
 import { formatarEuros, parseEuros } from '../util/formato'
 import {
   MSG_CARRO,
+  campoDaData,
   erroData,
   erroEuros,
+  erroFormatoData,
   erroFuturo,
   textoOuNulo,
   useLancamento,
@@ -36,6 +38,8 @@ const QUEM_PAGA = [
 
 const DATA_COMPLETA = /^\d{4}-\d{2}-\d{2}$/
 const MSG_COPART = 'A parte da empresa tem de ser maior que 0 e menor que o valor da multa.'
+/** Mesma mensagem que o núcleo devolve (`data_invalida`). */
+const MSG_PAGO_ANTES = 'O pagamento não pode ser anterior à infração.'
 
 /**
  * Multa: o condutor é sugerido pela atribuição do carro na data da infração (editável ou
@@ -46,7 +50,9 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
   /** '' = por identificar. */
   const [condutor, setCondutor] = useState('')
   /** Sugestão do núcleo para "carroId|data": id do motorista ou null (ninguém atribuído). */
-  const [sugestao, setSugestao] = useState<{ chave: string; id: number | null } | null>(null)
+  const [sugestao, setSugestao] = useState<{ chave: string; id: number | null; erro?: string } | null>(
+    null,
+  )
   const [infracao, setInfracao] = useState<Infracao>('velocidade')
   const [pontos, setPontos] = useState('0')
   const [valor, setValor] = useState('')
@@ -77,17 +83,32 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
   // Condutor sugerido para o carro na data da infração (só vale para o par carro/data pedido).
   const carroId = carro?.id ?? null
   const chave = `${carroId}|${dataInfracao}`
-  const sugerido = sugestao?.chave === chave ? sugestao.id : undefined
+  const sugestaoAtual = sugestao?.chave === chave ? sugestao : null
+  const sugerido = sugestaoAtual && sugestaoAtual.erro === undefined ? sugestaoAtual.id : undefined
+  const erroSugestao = sugestaoAtual?.erro
+
+  // Carro ou data mudaram: o condutor anterior deixa de valer até chegar a nova sugestão.
+  const [chaveVista, setChaveVista] = useState(chave)
+  if (chave !== chaveVista) {
+    setChaveVista(chave)
+    setCondutor('')
+  }
+
   useEffect(() => {
     if (carroId === null || !DATA_COMPLETA.test(dataInfracao)) return
     let vivo = true
+    const pedido = `${carroId}|${dataInfracao}`
     condutorSugerido(carroId, dataInfracao).then(
       (id) => {
         if (!vivo) return
-        setSugestao({ chave: `${carroId}|${dataInfracao}`, id })
+        setSugestao({ chave: pedido, id })
         setCondutor(id === null ? '' : String(id))
       },
-      () => {},
+      (e) => {
+        if (!vivo) return
+        setSugestao({ chave: pedido, id: null, erro: paraErroApi(e).mensagem })
+        setCondutor('')
+      },
     )
     return () => {
       vivo = false
@@ -141,7 +162,10 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
       valorEmpresa: erroEmpresa(tentou),
       dataNotificacao: erroFuturo(dataNotificacao),
       identificadoEm: erroFuturo(identificadoEm),
-      pagoEm: erroFuturo(pagoEm),
+      vencimento: erroFormatoData(vencimento),
+      pagoEm:
+        erroFuturo(pagoEm) ??
+        (!vazio(pagoEm) && !vazio(dataInfracao) && pagoEm < dataInfracao ? MSG_PAGO_ANTES : undefined),
     }
   }
 
@@ -166,8 +190,16 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
   }
 
   const erros: Erros = { ...validar(l.tentou), ...l.erros }
-  // Erros de data do núcleo: a data principal é a da infração.
-  if (l.erros.data) erros.dataInfracao = l.erros.data
+  // Erros de data do núcleo: no campo cuja data a mensagem refere; pagamento antes da infração
+  // vai para "Paga em"; senão, para a data da infração (a data principal).
+  if (l.erros.data) {
+    const alvo =
+      l.erros.data === MSG_PAGO_ANTES
+        ? 'pagoEm'
+        : (campoDaData(l.erros.data, { dataInfracao, dataNotificacao, vencimento, identificadoEm, pagoEm }) ??
+          'dataInfracao')
+    erros[alvo] = l.erros.data
+  }
 
   // Motoristas ativos, mais o escolhido/sugerido se estiver inativo.
   const opcoesCondutor = motoristas.filter(
@@ -176,7 +208,10 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
 
   let ajudaCondutor: string | undefined
   let tomCondutor: 'ok' | 'normal' | 'alerta' = 'normal'
-  if (sugerido !== undefined) {
+  if (erroSugestao) {
+    ajudaCondutor = erroSugestao
+    tomCondutor = 'alerta'
+  } else if (sugerido !== undefined) {
     if (sugerido !== null && condutor === String(sugerido)) {
       ajudaCondutor = '✓ Atribuído a este carro nesta data'
       tomCondutor = 'ok'
@@ -253,6 +288,7 @@ export function FormMulta({ carro, seletor, focoNoFormulario, onLancado, onCance
             type="date"
             value={vencimento}
             onChange={(e) => setVencimento(e.target.value)}
+            erro={erros.vencimento}
           />
         </div>
         <div className="form-par">

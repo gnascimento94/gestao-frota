@@ -2,7 +2,8 @@
 // Após um lançamento bem-sucedido a folha fecha, aparece "Lançado ✓" e o ecrã visível recarrega.
 
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { carrosListar } from '../api/comandos'
 import type { Carro } from '../api/tipos'
 import { paraErroApi } from '../ecras/comum'
@@ -24,6 +25,8 @@ export interface LancarProps {
   onFechar(): void
   /** Chamado depois de cada lançamento gravado (para o ecrã visível recarregar). */
   onLancado(): void
+  /** Contentor onde os toasts se empilham (ver `.zona-toasts`); sem ele, o toast fica aqui. */
+  zonaToasts?: HTMLElement | null
 }
 
 type Tipo = 'manutencao' | 'pneu' | 'documento' | 'multa' | 'km'
@@ -38,7 +41,7 @@ const TIPOS = [
 
 const DURACAO_TOAST_MS = 1800
 
-export function Lancar({ aberta, origem, carroId = null, onFechar, onLancado }: LancarProps) {
+export function Lancar({ aberta, origem, carroId = null, onFechar, onLancado, zonaToasts }: LancarProps) {
   const reduzir = useReducedMotion()
   // Cada lançamento incrementa o contador (o toast reinicia mesmo em lançamentos seguidos).
   const [toast, setToast] = useState(0)
@@ -48,6 +51,9 @@ export function Lancar({ aberta, origem, carroId = null, onFechar, onLancado }: 
     const t = setTimeout(() => setToast(0), DURACAO_TOAST_MS)
     return () => clearTimeout(t)
   }, [toast])
+
+  // O toast vai para a zona de toasts partilhada (empilhado com o "Desfazer"), se existir.
+  const portalOuLocal = (no: ReactNode) => (zonaToasts ? createPortal(no, zonaToasts) : no)
 
   const lancado = useCallback(() => {
     onFechar()
@@ -61,7 +67,8 @@ export function Lancar({ aberta, origem, carroId = null, onFechar, onLancado }: 
         <CabecalhoFolha titulo="Lançar" onFechar={onFechar} />
         <ConteudoLancar carroInicial={carroId} onLancado={lancado} onCancelar={onFechar} />
       </Folha>
-      <div className="toast-zona" role="status" aria-live="polite">
+      {portalOuLocal(
+        <div className="toast-zona" role="status" aria-live="polite">
         <AnimatePresence>
           {toast > 0 && (
             <motion.div
@@ -76,7 +83,8 @@ export function Lancar({ aberta, origem, carroId = null, onFechar, onLancado }: 
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+        </div>,
+      )}
     </>
   )
 }

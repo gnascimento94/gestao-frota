@@ -24,15 +24,18 @@ export function BoasVindas({ onCriado }: { onCriado(id: number): void }) {
  */
 export function InicioOuBoasVindas({
   ano,
+  versao = 0,
   onNavegar,
   children,
 }: {
   ano: number
+  /** Muda após cada lançamento (folha Lançar): os dados voltam a ser pedidos. */
+  versao?: number
   onNavegar(e: Ecra): void
   children: ReactNode
 }) {
   const buscar = useCallback(() => carrosListar(false, ano), [ano])
-  const { dados, erro, recarregar } = useCarregar(buscar)
+  const { dados, erro, recarregar } = useCarregar(buscar, versao)
   if (erro && dados === null) {
     return (
       <p className="form-erro" role="alert">

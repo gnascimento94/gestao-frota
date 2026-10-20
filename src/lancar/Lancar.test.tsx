@@ -234,3 +234,227 @@ test('erro do núcleo aparece no campo respetivo (data futura → data)', async 
   expect(screen.getByLabelText('Data').getAttribute('aria-invalid')).toBe('true')
   expect(screen.getByRole('dialog')).toBeTruthy()
 })
+
+
+// ---------- Ronda de correções 1 ----------
+
+const condutorSelect = () => screen.getByLabelText('Condutor') as HTMLSelectElement
+const dataInfracao = () => screen.getByLabelText('Data da infração')
+
+test('sugestão de condutor que falha limpa o condutor e mostra a mensagem do núcleo', async () => {
+  m.condutorSugerido
+    .mockResolvedValueOnce(3)
+    .mockRejectedValueOnce({ codigo: 'io', mensagem: 'Não foi possível ler as atribuições.' })
+  await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  await waitFor(() => expect(condutorSelect().value).toBe('3'))
+  fireEvent.change(dataInfracao(), { target: { value: '2026-09-01' } })
+  expect(await screen.findByText('Não foi possível ler as atribuições.')).toBeTruthy()
+  expect(condutorSelect().value).toBe('')
+  expect(m.condutorSugerido).toHaveBeenLastCalledWith(1, '2026-09-01')
+})
+
+test('mudar a data da infração limpa o condutor antes de chegar a nova sugestão', async () => {
+  m.condutorSugerido.mockResolvedValueOnce(3).mockReturnValueOnce(new Promise(() => {}))
+  await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  await waitFor(() => expect(condutorSelect().value).toBe('3'))
+  fireEvent.change(dataInfracao(), { target: { value: '2026-09-01' } })
+  expect(condutorSelect().value).toBe('')
+  fireEvent.change(dataInfracao(), { target: { value: '' } })
+  expect(condutorSelect().value).toBe('')
+})
+
+test("'Por identificar' envia motoristaId null", async () => {
+  const { user } = await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  await waitFor(() => expect(condutorSelect().value).toBe('3'))
+  await user.selectOptions(condutorSelect(), 'Por identificar')
+  await user.type(screen.getByLabelText('Valor da multa (€)'), '60')
+  await user.click(lancar())
+  await waitFor(() =>
+    expect(m.guardarMulta).toHaveBeenCalledWith(expect.objectContaining({ motoristaId: null })),
+  )
+})
+
+test("'A empresa adiantou' aparece em Colaborador e não em Empresa", async () => {
+  const { user } = await abrir('Multa')
+  await user.type(screen.getByLabelText('Valor da multa (€)'), '120')
+  expect(screen.queryByRole('switch', { name: 'A empresa adiantou o pagamento' })).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Colaborador' }))
+  const sw = screen.getByRole('switch', { name: 'A empresa adiantou o pagamento' })
+  expect(
+    screen.getByText((_, el) => el?.classList.contains('reparte-texto') === true &&
+      el.textContent === 'Empresa 0,00 € (0%) · Colaborador 120,00 €'),
+  ).toBeTruthy()
+  await user.click(sw)
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  await user.click(lancar())
+  await waitFor(() =>
+    expect(m.guardarMulta).toHaveBeenCalledWith(
+      expect.objectContaining({ responsavel: 'colaborador', valorEmpresa: null, empresaAdiantou: true }),
+    ),
+  )
+  await user.click(screen.getByRole('button', { name: 'Empresa' }))
+  expect(screen.queryByRole('switch', { name: 'A empresa adiantou o pagamento' })).toBeNull()
+})
+
+test("'Só tenho o total' envia valorPecas e valorMaoObra a null", async () => {
+  const { user } = await abrir()
+  await user.click(screen.getByRole('button', { name: 'Oficina' }))
+  await escolherTipoManutencao(user)
+  await user.type(screen.getByLabelText('Oficina'), 'Auto Lima')
+  await user.click(screen.getByRole('switch', { name: 'Só tenho o total' }))
+  expect(screen.queryByLabelText('Mão de obra (€)')).toBeNull()
+  await user.type(screen.getByLabelText('Total (€)'), '99,90')
+  await user.click(lancar())
+  await waitFor(() =>
+    expect(m.lancarManutencao).toHaveBeenCalledWith(
+      expect.objectContaining({ executadaPor: 'oficina', valor: 9990, valorPecas: null, valorMaoObra: null }),
+    ),
+  )
+})
+
+async function manutencaoNaOficina(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Oficina' }))
+  await escolherTipoManutencao(user)
+  await user.type(screen.getByLabelText('Oficina'), 'Auto Lima')
+  await user.type(screen.getByLabelText('Peças (€)'), '50')
+  await user.type(screen.getByLabelText('Mão de obra (€)'), '30')
+}
+
+test('falta_oficina do núcleo aparece no campo Oficina', async () => {
+  m.lancarManutencao.mockRejectedValue({ codigo: 'falta_oficina', mensagem: 'Indique o nome da oficina.' })
+  const { user } = await abrir()
+  await manutencaoNaOficina(user)
+  await user.click(lancar())
+  expect(await screen.findByText('Indique o nome da oficina.')).toBeTruthy()
+  expect(screen.getByLabelText('Oficina').getAttribute('aria-invalid')).toBe('true')
+})
+
+test('valor_nao_bate do núcleo aparece junto ao total', async () => {
+  m.lancarManutencao.mockRejectedValue({
+    codigo: 'valor_nao_bate',
+    mensagem: 'O total tem de ser igual a peças + mão de obra.',
+  })
+  const { user } = await abrir()
+  await manutencaoNaOficina(user)
+  await user.click(lancar())
+  const erro = await screen.findByText('O total tem de ser igual a peças + mão de obra.')
+  expect(erro.closest('.reparte')).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull() // não vai para a faixa geral
+})
+
+test('coparticipacao_invalida do núcleo aparece em "Parte da empresa"', async () => {
+  m.guardarMulta.mockRejectedValue({
+    codigo: 'coparticipacao_invalida',
+    mensagem: 'A parte da empresa tem de ser maior que 0 e menor que o valor da multa.',
+  })
+  const { user } = await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  await user.type(screen.getByLabelText('Valor da multa (€)'), '120')
+  await user.click(screen.getByRole('button', { name: 'Coparticipado' }))
+  await user.type(screen.getByLabelText('Parte da empresa (€)'), '40')
+  await user.click(lancar())
+  expect(
+    await screen.findByText('A parte da empresa tem de ser maior que 0 e menor que o valor da multa.'),
+  ).toBeTruthy()
+  expect(screen.getByLabelText('Parte da empresa (€)').getAttribute('aria-invalid')).toBe('true')
+})
+
+test.each([
+  ['referencia_invalida', 'O carro escolhido já não existe.'],
+  ['so_consulta', 'Os dados estão abertos só para consulta.'],
+])('%s vai para a faixa de erro', async (codigo, mensagem) => {
+  m.atualizarKm.mockRejectedValue({ codigo, mensagem })
+  const { user } = await abrir('Atualizar KM')
+  await user.click(lancar())
+  const faixa = await screen.findByRole('alert')
+  expect(faixa.textContent).toBe(mensagem)
+  expect(screen.getByLabelText('KM').getAttribute('aria-invalid')).toBeNull()
+})
+
+test('multa: pagamento antes da infração aparece em "Paga em" e não envia', async () => {
+  const { user } = await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  fireEvent.change(screen.getByLabelText('Paga em'), { target: { value: '2026-09-01' } })
+  await user.type(screen.getByLabelText('Valor da multa (€)'), '60')
+  await user.click(lancar())
+  expect(screen.getByText('O pagamento não pode ser anterior à infração.')).toBeTruthy()
+  expect(screen.getByLabelText('Paga em').getAttribute('aria-invalid')).toBe('true')
+  expect(m.guardarMulta).not.toHaveBeenCalled()
+})
+
+test('multa: erro de data do núcleo vai para o campo cuja data refere (prazo)', async () => {
+  m.guardarMulta.mockRejectedValue({ codigo: 'data_invalida', mensagem: 'Data inválida: 2026-11-30.' })
+  const { user } = await abrir('Multa')
+  fireEvent.change(dataInfracao(), { target: { value: '2026-10-01' } })
+  fireEvent.change(screen.getByLabelText('Prazo de pagamento'), { target: { value: '2026-11-30' } })
+  await user.type(screen.getByLabelText('Valor da multa (€)'), '60')
+  await user.click(lancar())
+  expect(await screen.findByText('Data inválida: 2026-11-30.')).toBeTruthy()
+  expect(screen.getByLabelText('Prazo de pagamento').getAttribute('aria-invalid')).toBe('true')
+  expect(dataInfracao().getAttribute('aria-invalid')).toBeNull()
+})
+
+test("documento envia tipo 'inspecao' e pagoEm null quando não foi pago", async () => {
+  const { user } = await abrir('Documento/taxa')
+  await user.click(screen.getByRole('button', { name: 'Inspeção' }))
+  await user.type(screen.getByLabelText('Valor (€)'), '35')
+  fireEvent.change(screen.getByLabelText('Vencimento'), { target: { value: '2026-11-30' } })
+  await user.click(lancar())
+  await waitFor(() =>
+    expect(m.lancarDocumento).toHaveBeenCalledWith({
+      carroId: 1,
+      tipo: 'inspecao',
+      descricao: null,
+      valor: 3500,
+      vencimento: '2026-11-30',
+      pagoEm: null,
+      anual: false,
+    }),
+  )
+})
+
+test('seletor de carro aceita o rótulo da lista sem "·" (carro vendido sem marca/modelo)', async () => {
+  const user = userEvent.setup()
+  m.carrosListar.mockResolvedValue([
+    carro,
+    { ...carro, id: 2, matricula: 'CC-34-DD', marca: null, modelo: null, estado: 'vendido', kmAtual: 1000 },
+  ])
+  render(<Lancar aberta origem={null} onFechar={() => {}} onLancado={() => {}} />)
+  await waitFor(() => expect(document.querySelectorAll('datalist option')).toHaveLength(2))
+  const campo = screen.getByLabelText('Carro')
+  expect(document.activeElement).toBe(campo) // sem carro pré-selecionado, o foco vai para o carro
+  fireEvent.change(campo, { target: { value: 'CC-34-DD (vendido)' } })
+  expect(screen.getByText(/KM atual: 1/)).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: 'Atualizar KM' }))
+  expect((screen.getByLabelText('KM') as HTMLInputElement).value).toBe('1000') // KM atual do carro escolhido
+  await user.clear(screen.getByLabelText('KM'))
+  await user.type(screen.getByLabelText('KM'), '1500')
+  await user.click(lancar())
+  await waitFor(() =>
+    expect(m.atualizarKm).toHaveBeenCalledWith(expect.objectContaining({ carroId: 2, km: 1500 })),
+  )
+})
+
+test('pesquisa "cc34" escolhe CC-34-DD', async () => {
+  const user = userEvent.setup()
+  m.carrosListar.mockResolvedValue([carro, { ...carro, id: 2, matricula: 'CC-34-DD' }])
+  render(<Lancar aberta origem={null} onFechar={() => {}} onLancado={() => {}} />)
+  await waitFor(() => expect(document.querySelectorAll('datalist option')).toHaveLength(2))
+  await user.type(screen.getByLabelText('Carro'), 'cc34')
+  expect(screen.getByText(/KM atual/)).toBeTruthy()
+})
+
+test('o toast "Lançado ✓" vai para a zona de toasts partilhada', async () => {
+  const zona = document.createElement('div')
+  document.body.appendChild(zona)
+  const user = userEvent.setup()
+  render(<Lancar aberta origem={null} carroId={1} onFechar={() => {}} onLancado={() => {}} zonaToasts={zona} />)
+  await screen.findByDisplayValue(/AA-12-BB/)
+  await user.click(screen.getByRole('button', { name: 'Atualizar KM' }))
+  await user.click(lancar())
+  await waitFor(() => expect(zona.textContent).toContain('Lançado ✓'))
+  zona.remove()
+})

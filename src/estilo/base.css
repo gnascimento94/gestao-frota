@@ -789,12 +789,25 @@ time {
 
 /* ---------- Desfazer (toast) ---------- */
 
-.desfazer-zona {
+/* Zona única de toasts ("Lançado ✓" por cima de "Desfazer"): empilham-se sem se sobrepor. */
+.zona-toasts {
   position: fixed;
   left: calc(var(--largura-lateral) + (100vw - var(--largura-lateral)) / 2);
   bottom: 24px;
   transform: translateX(-50%);
   z-index: 30;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Espaço só entre zonas com um toast visível (as vazias continuam no DOM como regiões "live"). */
+.zona-toasts > :not(:empty) ~ :not(:empty) {
+  margin-top: 8px;
+}
+
+.desfazer-zona {
   pointer-events: none;
 }
 

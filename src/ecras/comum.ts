@@ -37,7 +37,6 @@ export type CampoErro =
   | 'valor'
   | 'valorEmpresa'
   | 'oficina'
-  | 'tipo'
   | 'pontos'
   | 'ano'
   | 'geral'
@@ -64,8 +63,12 @@ export function errosDe(e: unknown): ErrosCampos {
   return { [campoDoErro(codigo)]: mensagem }
 }
 
-/** Carrega dados de forma assíncrona; `recarregar()` repete o pedido. */
-export function useCarregar<T>(buscar: () => Promise<T>) {
+/**
+ * Carrega dados de forma assíncrona; `recarregar()` repete o pedido, tal como uma mudança de
+ * `sinal` (a `versao` da App, que muda após cada lançamento). Os dados anteriores ficam à vista
+ * até chegarem os novos e o componente não remonta.
+ */
+export function useCarregar<T>(buscar: () => Promise<T>, sinal = 0) {
   const [dados, setDados] = useState<T | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [versao, setVersao] = useState(0)
@@ -85,7 +88,7 @@ export function useCarregar<T>(buscar: () => Promise<T>) {
     return () => {
       vivo = false
     }
-  }, [buscar, versao])
+  }, [buscar, versao, sinal])
 
   const recarregar = useCallback(() => setVersao((v) => v + 1), [])
   return { dados, erro, recarregar }

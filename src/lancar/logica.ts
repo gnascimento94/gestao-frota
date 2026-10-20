@@ -65,7 +65,20 @@ export function erroFuturo(texto: string): string | undefined {
   return !vazio(texto) && texto > hoje() ? MSG_FUTURO : undefined
 }
 
-export const temErros = (e: Erros) => Object.values(e).some(Boolean)
+/** Data opcional mal formada (não "AAAA-MM-DD"). */
+export function erroFormatoData(texto: string): string | undefined {
+  return !vazio(texto) && !/^\d{4}-\d{2}-\d{2}$/.test(texto.trim()) ? 'Data inválida.' : undefined
+}
+
+/**
+ * Campo a que se refere um erro de data do núcleo: o primeiro cuja data aparece na mensagem
+ * (por exemplo "Data inválida: 2026-13-01."); `undefined` se nenhum aparecer.
+ */
+export function campoDaData(mensagem: string, campos: Record<string, string>): string | undefined {
+  return Object.entries(campos).find(([, valor]) => !vazio(valor) && mensagem.includes(valor.trim()))?.[0]
+}
+
+export const temErros =(e: Erros) => Object.values(e).some(Boolean)
 
 /** `''` → `null`, senão o texto sem espaços nas pontas. */
 export const textoOuNulo = (t: string) => t.trim() || null

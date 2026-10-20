@@ -93,7 +93,8 @@ function FormMotorista({
   )
 }
 
-export function Motoristas({ ano }: { ano: number }) {
+/** `versao` muda após cada lançamento (folha Lançar): os dados voltam a ser pedidos. */
+export function Motoristas({ ano, versao = 0 }: { ano: number; versao?: number }) {
   const [mostrarTodos, setMostrarTodos] = useState(false)
   const [selecionado, setSelecionado] = useState<number | null>(null)
   const [folha, setFolha] = useState<{ aberta: boolean; origem: DOMRect | null; editar: boolean }>({
@@ -102,7 +103,7 @@ export function Motoristas({ ano }: { ano: number }) {
     editar: false,
   })
   const buscar = useCallback(() => motoristasListar(!mostrarTodos), [mostrarTodos])
-  const { dados, erro, recarregar } = useCarregar(buscar)
+  const { dados, erro, recarregar } = useCarregar(buscar, versao)
   const atual = dados?.find((m) => m.id === selecionado) ?? null
   const fechar = () => setFolha((f) => ({ ...f, aberta: false }))
 
@@ -165,6 +166,7 @@ export function Motoristas({ ano }: { ano: number }) {
             key={atual.id}
             motorista={atual}
             ano={ano}
+            versao={versao}
             aoAlterar={recarregar}
             aoApagado={() => {
               setSelecionado(null)
@@ -199,12 +201,14 @@ export function Motoristas({ ano }: { ano: number }) {
 function FichaMotorista({
   motorista,
   ano,
+  versao,
   aoAlterar,
   aoApagado,
   aoEditar,
 }: {
   motorista: Motorista
   ano: number
+  versao: number
   aoAlterar(): void
   aoApagado(): void
   aoEditar(origem: DOMRect): void
@@ -223,7 +227,7 @@ function FichaMotorista({
     const porReembolsar = lista.filter((x) => x.estadoMulta === 'porReembolsar')
     return { gastoAno: gasto.resumo.total, multas, atribuicoes, porReembolsar }
   }, [ano, motorista.id])
-  const { dados, erro, recarregar } = useCarregar(buscar)
+  const { dados, erro, recarregar } = useCarregar(buscar, versao)
 
   async function apagar() {
     setAviso(null)

@@ -210,13 +210,10 @@
 
 /* Toast "Lançado ✓" */
 
+/* Dentro da `.zona-toasts` (base.css), por cima do "Desfazer". */
 .toast-zona {
-  position: fixed;
-  left: calc(var(--largura-lateral) + (100vw - var(--largura-lateral)) / 2);
-  bottom: 24px;
-  transform: translateX(-50%);
-  z-index: 30;
   pointer-events: none;
+  order: -1;
 }
 
 .toast {
