@@ -1,5 +1,5 @@
 use crate::erro::{Erro, Res};
-use crate::migracoes::migrar;
+use crate::migracoes::{migrar, MIGRACOES};
 use crate::armazenamento::gravacao::{integridade_ok, gravar, Caminhos};
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime};
 use rusqlite::{Connection, OpenFlags};
@@ -84,17 +84,63 @@ fn snapshot(conn: &Connection, destino: &Path) -> Res<()> {
     r
 }
 
-/// Mantém no máximo `max` ficheiros datados (diários + manuais), apagando os mais
-/// antigos pelo nome (a data está no nome). Nunca apaga `proteger`.
-fn podar_datadas(dir: &Path, proteger: &str) -> Res<()> {
+/// `AAAA-MM-DD`, opcionalmente `_HHMM` e `-N` (sufixo anti-colisão) -> (data, hhmm, n).
+/// Qualquer nome fora deste formato (incluindo não-ASCII) devolve `None`.
+fn parse_datada(nome: &str) -> Option<(String, String, u32)> {
+    if !nome.is_ascii() {
+        return None;
+    }
+    let stem = nome.strip_prefix("frota_")?.strip_suffix(".db")?;
+    let b = stem.as_bytes();
+    if b.len() < 10 {
+        return None;
+    }
+    let padrao_data = |i: usize| match i {
+        4 | 7 => b[i] == b'-',
+        _ => b[i].is_ascii_digit(),
+    };
+    if !(0..10).all(padrao_data) {
+        return None;
+    }
+    let data = stem[..10].to_string();
+    let resto = &stem[10..];
+    if resto.is_empty() {
+        return Some((data, String::new(), 0));
+    }
+    let resto = resto.strip_prefix('_')?;
+    if resto.len() < 4 || !resto[..4].bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let hhmm = resto[..4].to_string();
+    let n = match &resto[4..] {
+        "" => 0,
+        s => {
+            let d = s.strip_prefix('-')?;
+            if d.is_empty() || !d.bytes().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            d.parse().ok()?
+        }
+    };
+    Some((data, hhmm, n))
+}
+
+/// Chave de ordenação cronológica pelo nome.
+fn chave(nome: &str) -> (String, String, u32) {
+    parse_datada(nome).unwrap_or_else(|| (nome.to_string(), String::new(), 0))
+}
+
+/// Mantém no máximo 30 ficheiros datados (diários + manuais), apagando os mais
+/// antigos pelo nome (a data está no nome). Nunca apaga os nomes em `proteger`.
+fn podar_datadas(dir: &Path, proteger: &[&str]) -> Res<()> {
     let mut v = ficheiros(dir, eh_datada)?;
-    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v.sort_by(|a, b| chave(&a.0).cmp(&chave(&b.0)));
     let mut excesso = v.len().saturating_sub(MAX_DIARIAS);
     for (nome, p, _) in v {
         if excesso == 0 {
             break;
         }
-        if nome == proteger {
+        if proteger.contains(&nome.as_str()) {
             continue;
         }
         std::fs::remove_file(p)?;
@@ -104,7 +150,7 @@ fn podar_datadas(dir: &Path, proteger: &str) -> Res<()> {
 }
 
 /// Mantém no máximo 5 cópias "antes da versão", pela data de modificação.
-fn podar_antes(dir: &Path, proteger: &str) -> Res<()> {
+fn podar_antes(dir: &Path, proteger: &[&str]) -> Res<()> {
     let mut v = ficheiros(dir, eh_antes)?;
     v.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
     let mut excesso = v.len().saturating_sub(MAX_ANTES_DA);
@@ -112,7 +158,7 @@ fn podar_antes(dir: &Path, proteger: &str) -> Res<()> {
         if excesso == 0 {
             break;
         }
-        if nome == proteger {
+        if proteger.contains(&nome.as_str()) {
             continue;
         }
         std::fs::remove_file(p)?;
@@ -131,28 +177,46 @@ pub fn copia_diaria(c: &Caminhos, hoje: NaiveDate) -> Res<bool> {
         return Ok(false);
     }
     copiar_banco(c, &destino)?;
-    podar_datadas(&dir, &nome)?;
+    podar_datadas(&dir, &[&nome])?;
     Ok(true)
 }
 
-/// `frota_antes-da-v{versao}.db`; substitui uma cópia com o mesmo nome.
+/// `frota_antes-da-v{versao}.db`. Nunca substitui: a primeira cópia anterior à
+/// atualização é a limpa, por isso se já existe não se copia nada.
 pub fn copia_antes_de(c: &Caminhos, versao: &str) -> Res<()> {
     if versao.is_empty() || versao.contains(['/', '\\']) || versao.contains("..") {
         return Err(versao_invalida());
     }
     let dir = pasta(c)?;
     let nome = format!("{PREFIXO_ANTES}v{versao}.db");
-    copiar_banco(c, &dir.join(&nome))?;
-    podar_antes(&dir, &nome)?;
+    let destino = dir.join(&nome);
+    if existe(&destino)? {
+        return Ok(());
+    }
+    copiar_banco(c, &destino)?;
+    podar_antes(&dir, &[&nome])?;
     Ok(())
+}
+
+/// Snapshot do estado atual, sem podar. Nunca sobrescreve: se o nome do minuto
+/// já existe usa `-2`, `-3`, ... Devolve o nome criado.
+fn copia_manual_sem_poda(conn: &Connection, dir: &Path, agora: NaiveDateTime) -> Res<String> {
+    let base = format!("frota_{}", agora.format("%Y-%m-%d_%H%M"));
+    let mut nome = format!("{base}.db");
+    let mut n = 2;
+    while existe(&dir.join(&nome))? {
+        nome = format!("{base}-{n}.db");
+        n += 1;
+    }
+    snapshot(conn, &dir.join(&nome))?;
+    Ok(nome)
 }
 
 /// Cópia manual do estado ATUAL da ligação (pode ser mais recente que `banco`).
 pub fn copia_manual(conn: &Connection, c: &Caminhos, agora: NaiveDateTime) -> Res<()> {
     let dir = pasta(c)?;
-    let nome = format!("frota_{}.db", agora.format("%Y-%m-%d_%H%M"));
-    snapshot(conn, &dir.join(&nome))?;
-    podar_datadas(&dir, &nome)?;
+    let nome = copia_manual_sem_poda(conn, &dir, agora)?;
+    podar_datadas(&dir, &[&nome])?;
     Ok(())
 }
 
@@ -177,15 +241,8 @@ fn contagens(p: &Path) -> (i64, i64) {
 
 /// `AAAA-MM-DD` (diária), `AAAA-MM-DD HH:MM` (manual) ou a modificação (antes-da).
 fn data_de(nome: &str, mtime: SystemTime) -> String {
-    if let Some(resto) = nome.strip_prefix("frota_").and_then(|n| n.strip_suffix(".db")) {
-        if eh_datada(nome) {
-            if let Some((d, h)) = resto.split_once('_') {
-                if h.len() == 4 {
-                    return format!("{d} {}:{}", &h[..2], &h[2..]);
-                }
-            }
-            return resto.to_string();
-        }
+    if let Some((d, h, _)) = parse_datada(nome) {
+        return if h.is_empty() { d } else { format!("{d} {}:{}", &h[..2], &h[2..]) };
     }
     DateTime::<Local>::from(mtime).format("%Y-%m-%d %H:%M").to_string()
 }
@@ -221,10 +278,15 @@ fn corrompida() -> Erro {
 /// Repõe uma versão: verifica-a, guarda uma cópia manual do estado atual,
 /// carrega-a em `conn`, migra e grava.
 pub fn restaurar(conn: &mut Connection, c: &Caminhos, nome: &str, agora: NaiveDateTime) -> Res<()> {
-    if nome.is_empty() || nome.contains(['/', '\\']) || nome.contains("..") || !(eh_datada(nome) || eh_antes(nome)) {
+    if nome.is_empty()
+        || nome.contains(['/', '\\'])
+        || nome.contains("..")
+        || !(parse_datada(nome).is_some() || eh_antes(nome))
+    {
         return Err(versao_invalida());
     }
-    let origem = pasta(c)?.join(nome);
+    let dir = pasta(c)?;
+    let origem = dir.join(nome);
     if !existe(&origem)? {
         return Err(versao_invalida());
     }
@@ -241,8 +303,16 @@ pub fn restaurar(conn: &mut Connection, c: &Caminhos, nome: &str, agora: NaiveDa
     if !integridade_ok(&origem_conn)? {
         return Err(corrompida());
     }
-    // 2. cópia de segurança do estado atual
-    copia_manual(conn, c, agora)?;
+    // versão criada por uma app mais recente: não a carregamos
+    let uv: i64 = origem_conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if uv > MIGRACOES.len() as i64 {
+        return Err(Erro {
+            codigo: "versao_mais_recente".into(),
+            mensagem: "Esta versão foi criada por uma versão mais recente da aplicação. Nada foi alterado.".into(),
+        });
+    }
+    // 2. cópia de segurança do estado atual (a poda só acontece no fim)
+    let seguranca = copia_manual_sem_poda(conn, &dir, agora)?;
     // 3. carregar a versão na ligação (API de backup)
     {
         let b = rusqlite::backup::Backup::new(&origem_conn, conn)?;
@@ -258,8 +328,12 @@ pub fn restaurar(conn: &mut Connection, c: &Caminhos, nome: &str, agora: NaiveDa
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
     migrar(conn)?;
     gravar(conn, c)?;
+    // 4. só agora se poda, protegendo a cópia de segurança e a versão usada
+    podar_datadas(&dir, &[&seguranca, nome])?;
+    podar_antes(&dir, &[nome])?;
     Ok(())
 }
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -339,8 +413,15 @@ mod testes {
     #[test]
     fn antes_da_nova_nunca_e_podada_mesmo_com_mtime_antigo() {
         let (_t, c, _conn) = cenario();
-        for i in 1..=5 {
+        // as 5 existentes ficam com mtime no futuro: a nova será a mais antiga
+        let futuro = SystemTime::now() + Duration::from_secs(10_000);
+        for i in 1..=5u64 {
             copia_antes_de(&c, &format!("1.0.{i}")).unwrap();
+            let f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(c.dados.join("versoes").join(format!("frota_antes-da-v1.0.{i}.db")))
+                .unwrap();
+            f.set_modified(futuro + Duration::from_secs(i)).unwrap();
         }
         copia_antes_de(&c, "1.0.6").unwrap();
         let n = nomes(&c, "frota_antes-da-");
@@ -415,6 +496,83 @@ mod testes {
         let n: i64 = b.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         assert!(!c.pendente.exists());
+    }
+
+    #[test]
+    fn duas_restauracoes_no_mesmo_minuto_nao_perdem_o_estado() {
+        let (_t, c, mut conn) = cenario();
+        inserir_carro(&conn, "AA-00-AA");
+        copia_manual(&conn, &c, dia(0).and_hms_opt(10, 0, 0).unwrap()).unwrap(); // X: 1 carro
+        inserir_carro(&conn, "BB-11-BB");
+        copia_manual(&conn, &c, dia(0).and_hms_opt(10, 1, 0).unwrap()).unwrap(); // Y: 2 carros
+        inserir_carro(&conn, "CC-22-CC"); // estado B: 3 carros
+        let t1 = dia(0).and_hms_opt(11, 0, 10).unwrap();
+        let t2 = dia(0).and_hms_opt(11, 0, 40).unwrap();
+        restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", t1).unwrap();
+        restaurar(&mut conn, &c, "frota_2026-01-01_1001.db", t2).unwrap();
+        let l = listar(&c).unwrap();
+        let a = l.iter().find(|v| v.nome == "frota_2026-01-01_1100.db").unwrap();
+        let b = l.iter().find(|v| v.nome == "frota_2026-01-01_1100-2.db").unwrap();
+        assert_eq!(a.carros, 3); // estado B preservado
+        assert_eq!(b.carros, 1); // estado após a 1.ª restauração
+        assert_eq!(b.data, "2026-01-01 11:00");
+        // e o sufixo é restaurável
+        restaurar(&mut conn, &c, "frota_2026-01-01_1100-2.db", dia(0).and_hms_opt(11, 5, 0).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn restaurar_a_mais_antiga_com_30_copias() {
+        let (_t, c, mut conn) = cenario();
+        inserir_carro(&conn, "AA-00-AA");
+        gravar(&conn, &c).unwrap();
+        for i in 0..30 {
+            copia_diaria(&c, dia(i)).unwrap();
+        }
+        inserir_carro(&conn, "BB-11-BB");
+        restaurar(&mut conn, &c, "frota_2026-01-01.db", dia(40).and_hms_opt(9, 0, 0).unwrap()).unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        let ns = nomes(&c, "frota_2");
+        assert_eq!(ns.len(), 30);
+        assert!(ns.contains(&"frota_2026-01-01.db".to_string())); // a origem sobrevive
+        assert!(ns.contains(&"frota_2026-02-10_0900.db".to_string())); // a segurança também
+        assert!(!ns.contains(&"frota_2026-01-02.db".to_string())); // a mais antiga das outras sai
+    }
+
+    #[test]
+    fn nomes_estranhos_nao_fazem_panico_no_listar() {
+        let (_t, c, _conn) = cenario();
+        copia_diaria(&c, dia(0)).unwrap();
+        let v = c.dados.join("versoes");
+        for n in ["frota_2é.db", "frota_2026-01-01_é.db", "frota_2.db", "frota_2026-01-0_1230.db", "frota_2026-01-01_12.db", "frota_2026-01-01_1230-x.db"] {
+            std::fs::write(v.join(n), b"x").unwrap();
+        }
+        let l = listar(&c).unwrap();
+        assert_eq!(l.len(), 7);
+    }
+
+    #[test]
+    fn restaurar_versao_de_esquema_mais_recente_e_recusada() {
+        let (_t, c, mut conn) = cenario();
+        inserir_carro(&conn, "AA-00-AA");
+        copia_manual(&conn, &c, dia(0).and_hms_opt(10, 0, 0).unwrap()).unwrap();
+        let p = c.dados.join("versoes").join("frota_2026-01-01_1000.db");
+        Connection::open(&p).unwrap().execute_batch("PRAGMA user_version=99").unwrap();
+        let e = restaurar(&mut conn, &c, "frota_2026-01-01_1000.db", dia(1).and_hms_opt(10, 0, 0).unwrap()).unwrap_err();
+        assert_eq!(e.codigo, "versao_mais_recente");
+        assert_eq!(nomes(&c, "frota_2").len(), 1);
+    }
+
+    #[test]
+    fn antes_da_existente_nao_e_substituida() {
+        let (_t, c, conn) = cenario();
+        copia_antes_de(&c, "1.0.0").unwrap();
+        inserir_carro(&conn, "AA-00-AA");
+        gravar(&conn, &c).unwrap();
+        copia_antes_de(&c, "1.0.0").unwrap();
+        let l = listar(&c).unwrap();
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].carros, 0);
     }
 
     #[test]
