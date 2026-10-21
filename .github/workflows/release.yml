@@ -62,15 +62,24 @@ jobs:
       - name: Versão a partir da tag
         run: |
           $versao = $env:TAG.Substring(1)
-          $conf = 'src-tauri/tauri.conf.json'
-          $json = Get-Content -Raw $conf | ConvertFrom-Json
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          $conf = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/tauri.conf.json'
+          $cargo = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/Cargo.toml'
+          $json = [System.IO.File]::ReadAllText($conf) | ConvertFrom-Json
           $json.version = $versao
-          $json | ConvertTo-Json -Depth 32 | Set-Content -Encoding utf8NoBOM $conf
-          $cargo = 'src-tauri/Cargo.toml'
-          $texto = Get-Content -Raw $cargo
+          [System.IO.File]::WriteAllText($conf, (($json | ConvertTo-Json -Depth 32) + "`n"), $utf8)
+          $texto = [System.IO.File]::ReadAllText($cargo)
           # só a primeira linha `version = ...` (a do [package])
           $texto = ([regex]'(?m)^version = "[^"]*"').Replace($texto, "version = `"$versao`"", 1)
-          Set-Content -Encoding utf8NoBOM -NoNewline $cargo $texto
+          [System.IO.File]::WriteAllText($cargo, $texto, $utf8)
+          # verificação
+          $vConf = ([System.IO.File]::ReadAllText($conf) | ConvertFrom-Json).version
+          $mCargo = [regex]::Match([System.IO.File]::ReadAllText($cargo), '(?m)^version = "([^"]*)"')
+          $vCargo = $mCargo.Groups[1].Value
+          Write-Host "tauri.conf.json: $vConf"
+          Write-Host "Cargo.toml:      $vCargo"
+          if ($vConf -ne $versao) { throw "tauri.conf.json tem versão '$vConf', esperado '$versao'" }
+          if ($vCargo -ne $versao) { throw "Cargo.toml tem versão '$vCargo', esperado '$versao'" }
 
       - run: npm ci
 
@@ -164,9 +173,12 @@ jobs:
             sha256     = (Get-FileHash publicar/Frota.exe -Algorithm SHA256).Hash.ToLowerInvariant()
             assinatura = (Get-Content -Raw publicar/Frota.exe.sig).Trim()
           }
-          $latest | ConvertTo-Json | Set-Content -Encoding utf8NoBOM publicar/latest.json
-          Get-Content publicar/latest.json
-          Set-Content -Encoding utf8NoBOM notas.md $notas
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          $latestPath = Join-Path $env:GITHUB_WORKSPACE 'publicar/latest.json'
+          $notasPath = Join-Path $env:GITHUB_WORKSPACE 'notas.md'
+          [System.IO.File]::WriteAllText($latestPath, ($latest | ConvertTo-Json), $utf8)
+          Get-Content $latestPath
+          [System.IO.File]::WriteAllText($notasPath, $notas, $utf8)
 
       - name: Criar Release
         env:
