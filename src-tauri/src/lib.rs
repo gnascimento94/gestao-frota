@@ -66,7 +66,8 @@ fn icone_conforme_tema(w: &tauri::WebviewWindow) {
     // 0 = ainda não posto, 1 = claro, 2 = escuro: só se troca quando muda.
     static ATUAL: AtomicU8 = AtomicU8::new(0);
     let escura = barra_escura();
-    if ATUAL.swap(if escura { 2 } else { 1 }, Ordering::SeqCst) == if escura { 2 } else { 1 } {
+    let estado = if escura { 2 } else { 1 };
+    if ATUAL.load(Ordering::SeqCst) == estado {
         return;
     }
     let png: &[u8] = if escura {
@@ -74,8 +75,10 @@ fn icone_conforme_tema(w: &tauri::WebviewWindow) {
     } else {
         include_bytes!("../icons/128x128@2x.png")
     };
-    if let Err(e) = tauri::image::Image::from_bytes(png).and_then(|i| w.set_icon(i)) {
-        log::warn!("não foi possível mudar o ícone da janela: {e}");
+    // Só se regista o estado depois de o ícone ser posto: uma falha volta a tentar.
+    match tauri::image::Image::from_bytes(png).and_then(|i| w.set_icon(i)) {
+        Ok(()) => ATUAL.store(estado, Ordering::SeqCst),
+        Err(e) => log::warn!("não foi possível mudar o ícone da janela: {e}"),
     }
 }
 

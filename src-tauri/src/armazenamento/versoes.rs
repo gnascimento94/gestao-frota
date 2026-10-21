@@ -416,8 +416,12 @@ fn rotulo_valido(rotulo: &str) -> Res<String> {
     // ".." e um ponto final dariam "..db": o nome do ficheiro seria recusado.
     if r.contains("..")
         || r.ends_with('.')
-        || r.chars()
-            .any(|ch| ch.is_control() || r#"<>:"/\|?*"#.contains(ch))
+        || r.chars().any(|ch| {
+            ch.is_control()
+                || r#"<>:"/\|?*"#.contains(ch)
+                // carateres invisíveis/de direção (p.ex. RTL override)
+                || matches!(ch, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+        })
     {
         return Err(erro_rotulo(
             "rotulo_invalido",
@@ -450,7 +454,14 @@ pub fn nomear(c: &Caminhos, nome: &str, rotulo: &str) -> Res<String> {
     }
     // `rename` no Windows substitui o destino: nunca por cima de outra cópia
     // (salvo o próprio ficheiro, numa mudança só de maiúsculas).
-    if !destino.eq_ignore_ascii_case(nome) && existe(&dir.join(&destino))? {
+    // Caminhos acima de 260 caracteres falham no SQLite (contagens/restauro).
+    if dir.join(&destino).as_os_str().len() > 250 {
+        return Err(erro_rotulo(
+            "rotulo_longo",
+            "O nome é demasiado longo para esta pasta. Escolha um nome mais curto.".into(),
+        ));
+    }
+    if destino.to_lowercase() != nome.to_lowercase() && existe(&dir.join(&destino))? {
         return Err(erro_rotulo(
             "nome_ocupado",
             format!("Já existe uma cópia com o nome de ficheiro «{destino}». Nada foi alterado."),
@@ -1102,7 +1113,16 @@ mod testes {
             (e.codigo.as_str(), e.campo.as_deref()),
             ("rotulo_longo", Some("rotulo"))
         );
-        for mau in ["a/b", "a\\b", "x:y", "a..b", "fim.", "a?", "tab\u{7}"] {
+        for mau in [
+            "a/b",
+            "a\\b",
+            "x:y",
+            "a..b",
+            "fim.",
+            "a?",
+            "tab\u{7}",
+            "a\u{202E}b",
+        ] {
             let e = nomear(&c, "frota_2026-01-01.db", mau).unwrap_err();
             assert_eq!(e.codigo, "rotulo_invalido", "{mau}");
         }
