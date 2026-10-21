@@ -77,6 +77,10 @@ pub struct EstadoArmazenamento {
     /// ISO local (`AAAA-MM-DDTHH:MM:SS`).
     pub ultima_gravacao: Option<String>,
     pub erro: Option<String>,
+    /// Nota informativa (não é erro): a última gravação correu bem, mas algo
+    /// secundário falhou (p.ex. o marcador `pendente` não saiu). Substituída a
+    /// cada gravação bem-sucedida.
+    pub nota_gravacao: Option<String>,
     /// Aviso do arranque (alterações deste PC guardadas em Backup por conflito,
     /// cópia local danificada, restauro). Fica até ser dispensado
     /// (`dispensar_aviso`); as gravações não o apagam.
@@ -92,6 +96,8 @@ pub struct Estado {
     so_consulta: AtomicBool,
     ultima_gravacao: Mutex<Option<NaiveDateTime>>,
     erro_gravacao: Mutex<Option<String>>,
+    /// Ver `EstadoArmazenamento::nota_gravacao`.
+    nota_gravacao: Mutex<Option<String>>,
     /// Ver `EstadoArmazenamento::aviso_arranque`.
     aviso_arranque: Mutex<Option<String>>,
     sujo: AtomicBool,
@@ -255,6 +261,7 @@ impl Estado {
             so_consulta: AtomicBool::new(false),
             ultima_gravacao: Mutex::new(None),
             erro_gravacao: Mutex::new(None),
+            nota_gravacao: Mutex::new(None),
             aviso_arranque: Mutex::new(None),
             sujo: AtomicBool::new(false),
             raiz: raiz.to_path_buf(),
@@ -379,6 +386,14 @@ impl Estado {
         match gravacao::isolar_trabalho_danificado(c, agora) {
             Ok(Some(p)) => self.juntar_aviso(msg_trabalho_danificado(&p)),
             Ok(None) => {}
+            // Não se conseguiu ler a cópia local (em uso, sem acesso): não é o mesmo
+            // que estar danificada. A mensagem já o diz; "Tentar de novo" repete.
+            Err(e) if e.codigo == gravacao::CODIGO_TRABALHO_IO => {
+                let _ = l.libertar();
+                return Arranque::SemPasta {
+                    mensagem: e.mensagem,
+                };
+            }
             Err(e) => {
                 let _ = l.libertar();
                 return Arranque::SemPasta {
@@ -426,11 +441,14 @@ impl Estado {
     /// Migra a pasta local antiga (`legado`), partilhada por todas as pastas de
     /// dados. Requer o lock. Nunca deita fora alterações por gravar:
     /// - sem `pendente`: `trabalho.db`/`assinatura` antigos são só cache e saem;
-    /// - com `pendente` e a assinatura antiga igual à do `banco` desta pasta (a
-    ///   última gravação deste PC foi para aqui e ninguém gravou depois): o
-    ///   trabalho passa a ser a cópia de trabalho desta pasta e é gravado já;
-    /// - com `pendente` noutros casos (pode ser de outra pasta, ou alguém gravou
-    ///   depois): é guardado como versão em `versoes` e avisa-se.
+    /// - com `pendente` e a assinatura antiga igual à do `banco` desta pasta (prova
+    ///   de que a última gravação deste PC foi para aqui e ninguém gravou depois):
+    ///   o trabalho passa a ser a cópia de trabalho desta pasta e é gravado já;
+    ///   se isso não for possível (esta pasta já tem alterações por gravar, ou a
+    ///   migração falhou) vai para `versoes\frota_legado_*.db` (nunca podado);
+    /// - com `pendente` sem essa prova (pode ser de outra pasta): NÃO entra na
+    ///   pasta partilhada. Fica neste PC, em `<legado>\legado_por_gravar_*.db`
+    ///   (com os auxiliares), o `pendente` antigo sai e avisa-se com o caminho.
     ///
     /// Devolve o aviso a mostrar, se houver.
     fn migrar_legado(&self, agora: NaiveDateTime) -> Option<String> {
@@ -449,16 +467,26 @@ impl Estado {
             let _ = std::fs::remove_file(&l_pend);
         };
         if !(l_pend.exists() && l_trab.exists()) {
+            // Auxiliares sem o principal, com `pendente`: restos de uma
+            // renomeação parcial (o principal está noutro sítio). Não se apagam.
+            let orfaos =
+                l_pend.exists() && gravacao::auxiliares_de(&l_trab).map_or(true, |v| !v.is_empty());
+            if orfaos {
+                log::warn!("pasta local antiga com auxiliares sem trabalho.db: deixada como está");
+                return None;
+            }
             limpar();
             log::info!("pasta local antiga sem alterações por gravar: removida");
             return None;
         }
-        let mesma = !self.pendente()
-            && std::fs::read_to_string(&l_ass)
-                .ok()
-                .zip(assinatura_antiga_de(&c.banco))
-                .is_some_and(|(g, a)| g == a);
-        if mesma {
+        let comprovada = std::fs::read_to_string(&l_ass)
+            .ok()
+            .zip(assinatura_antiga_de(&c.banco))
+            .is_some_and(|(g, a)| g == a);
+        if !comprovada {
+            return Some(self.guardar_legado_local(leg, &l_trab, &l_pend, &l_ass, agora));
+        }
+        if !self.pendente() {
             // Marcador primeiro: um trabalho já movido sem marcador seria substituído pelo banco.
             let r = gravacao::limpar_trabalho(&c.trabalho, true)
                 .and_then(|_| gravacao::marcar_pendente(c))
@@ -471,20 +499,36 @@ impl Estado {
                     log::info!("pasta local antiga migrada para {}", c.trabalho.display());
                     return None;
                 }
-                Err(e) => log::warn!(
-                    "não foi possível migrar a pasta local antiga: {}",
-                    e.mensagem
-                ),
+                // O principal já está em `c.trabalho` (com o marcador): segue-se com
+                // ele, e o que ficou na pasta antiga não se apaga.
+                Err(e) if e.codigo == gravacao::CODIGO_MOVER_PARCIAL => {
+                    log::error!("migração parcial da pasta local antiga: {}", e.mensagem);
+                    self.registar_assinatura();
+                    return Some(format!(
+                        "As alterações por gravar de uma versão anterior do programa foram passadas para esta pasta, mas alguns ficheiros auxiliares ficaram em {} ({}). Não os apague.",
+                        leg.display(),
+                        e.mensagem
+                    ));
+                }
+                Err(e) => {
+                    // Nada foi movido: o marcador criado agora não pode fazer valer
+                    // uma cópia de trabalho que não existe.
+                    let _ = std::fs::remove_file(&c.pendente);
+                    log::warn!(
+                        "não foi possível migrar a pasta local antiga: {}",
+                        e.mensagem
+                    );
+                }
             }
         }
-        let r = Connection::open(&l_trab)
+        let r = Connection::open_with_flags(&l_trab, OpenFlags::SQLITE_OPEN_READ_WRITE)
             .map_err(Erro::from)
-            .and_then(|conn| versoes::copia_manual(&conn, c, agora));
+            .and_then(|conn| versoes::copia_legado(&conn, c, agora));
         match r {
             Ok(nome) => {
                 limpar();
                 Some(format!(
-                    "Foram encontradas alterações deste PC que não tinham sido guardadas (de uma versão anterior do programa). Foram guardadas em Backup (cópia {nome}); restaure-a se forem desta pasta."
+                    "Foram encontradas alterações deste PC que não tinham sido guardadas (de uma versão anterior do programa). Foram guardadas em Backup (cópia {nome}); restaure-a para as recuperar."
                 ))
             }
             Err(e) => {
@@ -494,6 +538,47 @@ impl Estado {
                     e.mensagem,
                     l_trab.display()
                 ))
+            }
+        }
+    }
+
+    /// Alterações antigas por gravar sem prova de que são desta pasta de dados:
+    /// ficam neste PC (`<legado>\legado_por_gravar_AAAA-MM-DD_HHMM.db`, com os
+    /// auxiliares) e nunca vão para a pasta partilhada. Devolve o aviso.
+    fn guardar_legado_local(
+        &self,
+        leg: &Path,
+        l_trab: &Path,
+        l_pend: &Path,
+        l_ass: &Path,
+        agora: NaiveDateTime,
+    ) -> String {
+        let base = format!("legado_por_gravar_{}", agora.format("%Y-%m-%d_%H%M"));
+        let r = gravacao::nome_livre(leg, &base).and_then(|destino| {
+            gravacao::mover_base(l_trab, &destino)?;
+            Ok(destino)
+        });
+        match r {
+            Ok(destino) => {
+                let _ = std::fs::remove_file(l_pend);
+                let _ = std::fs::remove_file(l_ass);
+                let _ = std::fs::remove_file(leg.join("assinatura.tmp"));
+                log::warn!(
+                    "pasta local antiga de origem incerta guardada em {}",
+                    destino.display()
+                );
+                format!(
+                    "Foram encontradas alterações deste PC que não tinham sido guardadas (de uma versão anterior do programa), mas não foi possível confirmar que são desta pasta de dados. Não foram misturadas com estes dados: ficaram guardadas neste computador em {}.",
+                    destino.display()
+                )
+            }
+            Err(e) => {
+                log::warn!("pasta local antiga não posta de lado: {}", e.mensagem);
+                format!(
+                    "Foram encontradas alterações deste PC por gravar de uma versão anterior do programa, de origem incerta. Não foram misturadas com estes dados e ficaram em {} ({}).",
+                    l_trab.display(),
+                    e.mensagem
+                )
             }
         }
     }
@@ -524,7 +609,7 @@ impl Estado {
             self.sujo.store(true, Ordering::SeqCst);
         }
         if let Some(a) = aberto.aviso {
-            *trava(&self.erro_gravacao) = Some(a);
+            *trava(&self.nota_gravacao) = Some(a);
         }
     }
 
@@ -749,7 +834,8 @@ impl Estado {
                 self.registar_assinatura();
                 self.sujo.store(false, Ordering::SeqCst);
                 *trava(&self.ultima_gravacao) = Some(agora);
-                *trava(&self.erro_gravacao) = aviso;
+                *trava(&self.erro_gravacao) = None;
+                *trava(&self.nota_gravacao) = aviso;
                 *trava(&self.ultima_falha) = None;
                 Ok(())
             }
@@ -831,6 +917,7 @@ impl Estado {
             ultima_gravacao: trava(&self.ultima_gravacao)
                 .map(|d| d.format("%Y-%m-%dT%H:%M:%S").to_string()),
             erro: trava(&self.erro_gravacao).clone(),
+            nota_gravacao: trava(&self.nota_gravacao).clone(),
             aviso_arranque: trava(&self.aviso_arranque).clone(),
             so_consulta: self.so_consulta.load(Ordering::SeqCst),
             versao_app: env!("CARGO_PKG_VERSION").to_string(),
@@ -862,7 +949,8 @@ impl Estado {
     /// Depois de um arranque `Corrompido` (sem ligação): adquire o lock e volta a
     /// verificar o `banco` — se entretanto ficou válido (p.ex. a sincronização do
     /// Drive terminou) NÃO restaura nada, abre normalmente e avisa. Senão move o
-    /// `banco` atual para `versoes\frota_danificado_*.db` (nunca se perde), restaura
+    /// `banco` atual para `versoes\frota_danificado_*.db` (danificado) ou
+    /// `versoes\frota_posto_de_parte_*.db` (vazio/ilegível) — nunca se perde —, restaura
     /// para uma ligação vazia em memória (sem cópia de segurança, que seria de uma
     /// base vazia), o que grava `banco`, e continua o arranque normal. Se o restauro
     /// falhar, o ficheiro posto de lado volta ao lugar.
@@ -883,7 +971,8 @@ impl Estado {
                     self.registar_assinatura();
                     self.sujo.store(false, Ordering::SeqCst);
                     *trava(&self.ultima_gravacao) = Some(agora);
-                    *trava(&self.erro_gravacao) = aviso;
+                    *trava(&self.erro_gravacao) = None;
+                    *trava(&self.nota_gravacao) = aviso;
                     *trava(&self.ultima_falha) = None;
                     Ok(())
                 }
@@ -929,11 +1018,16 @@ impl Estado {
     /// lock. Devolve a cópia de trabalho aberta e o aviso a mostrar.
     fn restaurar_no_arranque(&self, nome: &str, agora: NaiveDateTime) -> Res<(Aberto, String)> {
         let c = &self.caminhos;
-        if gravacao::estado_banco(&c.banco)? == EstadoBanco::Valido {
+        let estado = gravacao::estado_banco(&c.banco)?;
+        if estado == EstadoBanco::Valido {
             log::info!("restauro no arranque: o banco voltou a ser válido; nada restaurado");
             return Ok((gravacao::abrir_trabalho(c)?, MSG_BANCO_VOLTOU.to_string()));
         }
-        let posto_de_lado = versoes::guardar_danificado(c, agora)?;
+        // Vazio/ilegível -> `frota_posto_de_parte_*` (pode vir a ter dados bons);
+        // danificado -> `frota_danificado_*`. Um erro deixa o banco no lugar
+        // (salvo `mover_parcial`, e aí o arranque recusa criar uma base vazia).
+        let vazio = estado == EstadoBanco::Vazio;
+        let posto_de_lado = versoes::guardar_danificado(c, agora, vazio)?;
         let r = (|| {
             // Num arranque `Corrompido` não havia alterações pendentes (com
             // pendente abre-se o trabalho, não o banco): a cópia de trabalho é
@@ -947,6 +1041,9 @@ impl Estado {
         match r {
             Ok(aberto) => {
                 let aviso = match &posto_de_lado {
+                    Some(n) if vazio => format!(
+                        "Foi restaurada uma cópia de segurança. O ficheiro de dados que estava vazio ou incompleto foi posto de parte em Backup ({n}); se a sincronização o completar, pode restaurá-lo de lá."
+                    ),
                     Some(n) => format!(
                         "Foi restaurada uma cópia de segurança. O ficheiro danificado foi guardado à parte em Backup ({n})."
                     ),
@@ -1608,6 +1705,75 @@ mod testes {
         assert!(!raiz.join("dados").join("frota.lock").exists());
     }
 
+    /// v0.1.1: no caso "vazio" o ficheiro é posto de parte (não "danificado") e,
+    /// se depois ficar com dados bons, pode ser restaurado.
+    #[test]
+    fn vazio_restaurado_fica_posto_de_parte_e_e_restauravel_depois() {
+        let (_t, raiz, local) = cenario();
+        let banco = banco_com_um_carro(&raiz, &local);
+        let bom = std::fs::read(&banco).unwrap();
+        std::fs::write(&banco, b"").unwrap();
+        let (e, a) = Estado::arrancar(&raiz, &local, "PC-A", s(10));
+        assert!(matches!(
+            a,
+            Arranque::Corrompido {
+                motivo: MotivoCorrompido::Vazio,
+                ..
+            }
+        ));
+        e.restaurar_versao("frota_2026-10-20.db", s(60)).unwrap();
+        assert_eq!(e.arranque(), Arranque::Ok);
+        let posto = "frota_posto_de_parte_2026-10-20_1201.db";
+        let aviso = e.armazenamento().aviso_arranque.unwrap();
+        assert!(
+            aviso.contains(posto) && aviso.contains("posto de parte"),
+            "{aviso}"
+        );
+        assert!(!aviso.contains("danificado"), "{aviso}");
+        let p = raiz.join("dados").join("versoes").join(posto);
+        let v = e.listar_versoes().unwrap();
+        assert!(!v.iter().find(|x| x.nome == posto).unwrap().restauravel);
+        // a sincronização acaba por completar o ficheiro posto de parte
+        std::fs::write(&p, &bom).unwrap();
+        let v = e.listar_versoes().unwrap();
+        assert!(v.iter().find(|x| x.nome == posto).unwrap().restauravel);
+        inserir(&e, s(70), "BB-11-BB").unwrap();
+        e.restaurar_versao(posto, s(120)).unwrap();
+        let n: i64 = e
+            .ler(|c| Ok(c.query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(n, 1);
+        // com cópia de segurança do estado anterior (2 carros)
+        assert_eq!(
+            versao_com(&raiz, "BB-11-BB").as_deref(),
+            Some("frota_2026-10-20_1202.db")
+        );
+    }
+
+    /// v0.1.1: um erro de leitura da cópia local não é "cópia local danificada";
+    /// é `SemPasta` (pode tentar-se de novo) e nada é posto de lado.
+    #[test]
+    fn trabalho_ilegivel_por_io_da_sem_pasta_e_tentar_de_novo_recupera() {
+        let (_t, raiz, local) = cenario();
+        banco_com_um_carro(&raiz, &local);
+        std::fs::remove_file(local.join("trabalho.db")).unwrap();
+        std::fs::create_dir_all(local.join("trabalho.db")).unwrap();
+        std::fs::write(local.join("pendente"), b"").unwrap();
+        let (e, a) = Estado::arrancar(&raiz, &local, "PC-A", s(10));
+        match &a {
+            Arranque::SemPasta { mensagem } => {
+                assert!(mensagem.contains("Não foi possível ler"), "{mensagem}");
+                assert!(!mensagem.contains("danificada"), "{mensagem}");
+            }
+            outro => panic!("{outro:?}"),
+        }
+        assert!(!raiz.join("dados").join("frota.lock").exists());
+        assert!(local.join("pendente").exists());
+        // o obstáculo desaparece: "Tentar de novo" abre normalmente
+        std::fs::remove_dir(local.join("trabalho.db")).unwrap();
+        assert_eq!(e.tentar_arranque(s(20)), Arranque::Ok);
+    }
+
     #[test]
     fn corrompido_serializa_motivo_e_mensagem() {
         let a = Arranque::Corrompido {
@@ -1720,7 +1886,14 @@ mod testes {
         a.tick(s(3));
         drop(tranca);
         let est = a.armazenamento();
-        assert!(est.erro.as_deref().unwrap().contains("foram guardados"));
+        // v0.1.1: é uma nota informativa, não um erro de gravação
+        assert_eq!(est.erro, None);
+        assert!(
+            est.nota_gravacao
+                .as_deref()
+                .unwrap()
+                .contains("foram guardados")
+        );
         assert!(est.ultima_gravacao.is_some());
         assert_eq!(carros_no_banco(&banco), 1);
         // a gravação seguinte não vê um conflito falso
@@ -1729,6 +1902,7 @@ mod testes {
         let est = a.armazenamento();
         assert!(!est.so_consulta);
         assert_eq!(est.erro, None);
+        assert_eq!(est.nota_gravacao, None);
         assert_eq!(carros_no_banco(&banco), 2);
     }
 
@@ -1787,23 +1961,72 @@ mod testes {
         assert!(!novo.join("pendente").exists());
     }
 
+    /// v0.1.1: sem prova de que é desta pasta, fica neste PC e nunca entra nas
+    /// versões partilhadas.
     #[test]
-    fn legado_de_origem_incerta_fica_em_backup_e_avisa() {
+    fn legado_de_origem_incerta_fica_local_e_avisa() {
         let (_t, raiz, local) = cenario();
         let legado = local.join("antigo");
         let banco = banco_com_um_carro(&raiz, &local.join("x"));
         legado_com_pendente(&raiz, &legado, false, "L1");
+        std::fs::write(legado.join("trabalho.db-journal"), b"").unwrap();
         let (e, a) =
             Estado::arrancar_com_legado(&raiz, &local.join("novo"), Some(&legado), "PC-A", s(60));
         assert_eq!(a, Arranque::Ok);
+        let guardado = legado.join("legado_por_gravar_2026-10-20_1201.db");
         let aviso = e.armazenamento().aviso_arranque.unwrap();
-        assert!(aviso.contains("frota_2026-10-20_1201.db"), "{aviso}");
+        assert!(aviso.contains(&guardado.display().to_string()), "{aviso}");
+        assert!(aviso.contains("não foi possível confirmar"), "{aviso}");
+        assert!(tem(&guardado, "L1"));
+        assert!(
+            legado
+                .join("legado_por_gravar_2026-10-20_1201.db-journal")
+                .exists()
+        );
         assert!(!tem(&banco, "L1"), "não grava por cima sem certeza");
         assert_eq!(
-            versao_com(&raiz, "L1").as_deref(),
-            Some("frota_2026-10-20_1201.db")
+            versao_com(&raiz, "L1"),
+            None,
+            "nada nas versões partilhadas"
         );
         assert!(!legado.join("pendente").exists());
+        assert!(!legado.join("trabalho.db").exists());
+        assert!(!legado.join("assinatura").exists());
+        // o arranque seguinte não volta a mexer no ficheiro guardado
+        drop(e);
+        let (e2, _) =
+            Estado::arrancar_com_legado(&raiz, &local.join("novo"), Some(&legado), "PC-A", s(120));
+        assert_eq!(e2.armazenamento().aviso_arranque, None);
+        assert!(tem(&guardado, "L1"));
+    }
+
+    /// v0.1.1: comprovadamente desta pasta, mas esta pasta já tem alterações por
+    /// gravar: vai para `frota_legado_*` (não podado) em Backup.
+    #[test]
+    fn legado_comprovado_que_nao_se_pode_migrar_vai_para_frota_legado() {
+        let (_t, raiz, local) = cenario();
+        let legado = local.join("antigo");
+        let novo = local.join("novo");
+        let banco = banco_com_um_carro(&raiz, &novo);
+        legado_com_pendente(&raiz, &legado, true, "L1");
+        std::fs::write(novo.join("pendente"), b"").unwrap();
+        let (e, a) = Estado::arrancar_com_legado(&raiz, &novo, Some(&legado), "PC-A", s(60));
+        assert_eq!(a, Arranque::Ok);
+        let aviso = e.armazenamento().aviso_arranque.unwrap();
+        assert!(aviso.contains("frota_legado_2026-10-20_1201.db"), "{aviso}");
+        assert_eq!(
+            versao_com(&raiz, "L1").as_deref(),
+            Some("frota_legado_2026-10-20_1201.db")
+        );
+        assert!(!tem(&banco, "L1"));
+        assert!(!legado.join("pendente").exists());
+        let v = e.listar_versoes().unwrap();
+        assert!(
+            v.iter()
+                .find(|x| x.nome == "frota_legado_2026-10-20_1201.db")
+                .unwrap()
+                .restauravel
+        );
     }
 
     #[test]

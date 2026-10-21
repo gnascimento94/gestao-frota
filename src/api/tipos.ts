@@ -28,6 +28,8 @@ export interface EstadoArmazenamento {
   /** ISO local "AAAA-MM-DDTHH:MM:SS". */
   ultimaGravacao: string | null
   erro: string | null
+  /** Nota informativa (não é erro): gravado, mas algo secundário falhou. */
+  notaGravacao: string | null
   /** Aviso do arranque (conflito com outro PC); fica até `dispensarAviso()`. */
   avisoArranque: string | null
   soConsulta: boolean
@@ -49,6 +51,8 @@ export interface Versao {
   /** -1 se não foi possível ler. */
   carros: number
   lancamentos: number
+  /** O núcleo deixa restaurar esta versão (os ficheiros postos de lado só se passarem a verificação). */
+  restauravel: boolean
 }
 
 // ---------- carros ----------

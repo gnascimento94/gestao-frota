@@ -16,8 +16,8 @@ const d = new Date()
 const hojeIso = `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`
 
 const versoes: Versao[] = [
-  { nome: 'frota_x_1842.db', data: `${hojeIso} 18:42`, tamanho: 1, carros: 23, lancamentos: 412 },
-  { nome: 'frota_2020-01-01.db', data: '2020-01-01', tamanho: 1, carros: -1, lancamentos: -1 },
+  { nome: 'frota_x_1842.db', data: `${hojeIso} 18:42`, tamanho: 1, carros: 23, lancamentos: 412, restauravel: true },
+  { nome: 'frota_2020-01-01.db', data: '2020-01-01', tamanho: 1, carros: -1, lancamentos: -1, restauravel: true },
 ]
 
 const estado = (extra: Partial<EstadoArmazenamento> = {}): EstadoArmazenamento => ({
@@ -25,6 +25,7 @@ const estado = (extra: Partial<EstadoArmazenamento> = {}): EstadoArmazenamento =
   noGoogleDrive: false,
   ultimaGravacao: null,
   erro: null,
+  notaGravacao: null,
   avisoArranque: null,
   soConsulta: false,
   versaoApp: '0.1.0',
@@ -56,12 +57,37 @@ test('no Google Drive não há aviso; o erro de gravação aparece junto da últ
 
 test('a última cópia ignora o ficheiro danificado posto de lado', async () => {
   m.listarVersoes.mockResolvedValue([
-    { nome: 'frota_danificado_2030-01-01_0900.db', data: '2030-01-01 09:00', tamanho: 1, carros: -1, lancamentos: -1 },
+    { nome: 'frota_danificado_2030-01-01_0900.db', data: '2030-01-01 09:00', tamanho: 1, carros: -1, lancamentos: -1, restauravel: false },
     ...versoes,
   ])
   render(<Backup estado={estado()} onRestaurado={() => {}} />)
   expect(await screen.findByText(/Última cópia: hoje, 18:42/)).toBeTruthy()
   expect(screen.getByText(/Ficheiro danificado guardado à parte/)).toBeTruthy()
+})
+
+test('ficheiro posto de parte: rótulo próprio e restaurável só quando o núcleo o diz', async () => {
+  m.listarVersoes.mockResolvedValue([
+    { nome: 'frota_posto_de_parte_2030-01-01_0900.db', data: '2030-01-01 09:00', tamanho: 9, carros: 2, lancamentos: 3, restauravel: true },
+    { nome: 'frota_posto_de_parte_2030-01-01_0800.db', data: '2030-01-01 08:00', tamanho: 0, carros: -1, lancamentos: -1, restauravel: false },
+    { nome: 'frota_danificado_2029-01-01_0900.db', data: '2029-01-01 09:00', tamanho: 9, carros: 1, lancamentos: 0, restauravel: true },
+    ...versoes,
+  ])
+  render(<Backup estado={estado()} onRestaurado={() => {}} />)
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  const linhas = within(lista).getAllByRole('listitem')
+  expect(within(linhas[0]).getByText(/Ficheiro posto de parte/)).toBeTruthy()
+  expect(within(linhas[0]).queryByText(/danificado/i)).toBeNull()
+  expect(within(linhas[0]).getByRole('button', { name: 'Restaurar…' })).toBeTruthy()
+  expect(within(linhas[1]).queryByRole('button')).toBeNull()
+  expect(within(linhas[1]).getByText('Não restaurável')).toBeTruthy()
+  // o nome não decide: um "danificado" que passa a verificação é restaurável
+  expect(within(linhas[2]).getByRole('button', { name: 'Restaurar…' })).toBeTruthy()
+  // "Mais recente" e "Última cópia" ficam na cópia do sistema
+  expect(within(linhas[3]).getByText('Mais recente')).toBeTruthy()
+  expect(screen.getByText(/Última cópia: hoje, 18:42/)).toBeTruthy()
+  await userEvent.click(within(linhas[0]).getByRole('button', { name: 'Restaurar…' }))
+  await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restaurar' }))
+  expect(m.restaurarVersao).toHaveBeenCalledWith('frota_posto_de_parte_2030-01-01_0900.db')
 })
 
 test('depois de restaurar a lista é pedida uma só vez', async () => {

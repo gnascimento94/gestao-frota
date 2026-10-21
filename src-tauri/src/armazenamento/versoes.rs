@@ -10,9 +10,21 @@ const MAX_DIARIAS: usize = 30;
 const MAX_ANTES_DA: usize = 5;
 const PREFIXO_DATADA: &str = "frota_2";
 const PREFIXO_ANTES: &str = "frota_antes-da-";
-/// `frota_danificado_AAAA-MM-DD_HHMM.db`: o `banco` danificado posto de lado antes
-/// de um restauro no arranque. Nunca é podado nem restaurável (só listado).
+/// `frota_danificado_AAAA-MM-DD_HHMM.db`: o `banco` danificado (falha a
+/// verificação de integridade) posto de lado antes de um restauro no arranque.
 pub const PREFIXO_DANIFICADO: &str = "frota_danificado_";
+/// `frota_posto_de_parte_AAAA-MM-DD_HHMM.db`: o `banco` vazio ou ilegível (p.ex.
+/// ainda não descarregado pelo Google Drive) posto de lado antes de um restauro
+/// no arranque. Pode vir a conter dados bons.
+pub const PREFIXO_POSTO_DE_PARTE: &str = "frota_posto_de_parte_";
+/// `frota_legado_AAAA-MM-DD_HHMM.db`: alterações por gravar da pasta local
+/// antiga, comprovadamente desta pasta de dados, que não puderam ser migradas.
+pub const PREFIXO_LEGADO: &str = "frota_legado_";
+
+/// Ficheiros postos de lado: nunca são podados nem contam para as 30. Só são
+/// restauráveis se passarem a verificação (ver `Versao::restauravel`).
+const PREFIXOS_POSTOS_DE_LADO: [&str; 3] =
+    [PREFIXO_DANIFICADO, PREFIXO_POSTO_DE_PARTE, PREFIXO_LEGADO];
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +34,10 @@ pub struct Versao {
     pub tamanho: u64,
     pub carros: i64,
     pub lancamentos: i64,
+    /// A UI pode oferecer o restauro. Cópias diárias/manuais/antes-da: sempre
+    /// (o restauro verifica-as). Ficheiros postos de lado: só se passarem a
+    /// verificação de integridade e de esquema.
+    pub restauravel: bool,
 }
 
 fn existe(p: &Path) -> Res<bool> {
@@ -42,8 +58,8 @@ fn eh_antes(nome: &str) -> bool {
     nome.starts_with(PREFIXO_ANTES) && nome.ends_with(".db")
 }
 
-fn eh_danificado(nome: &str) -> bool {
-    nome.starts_with(PREFIXO_DANIFICADO) && nome.ends_with(".db")
+fn eh_posto_de_lado(nome: &str) -> bool {
+    nome.ends_with(".db") && PREFIXOS_POSTOS_DE_LADO.iter().any(|p| nome.starts_with(p))
 }
 
 /// A poda é uma arrumação: um erro aqui fica no registo e nunca transforma uma
@@ -236,20 +252,41 @@ pub fn copia_manual(conn: &Connection, c: &Caminhos, agora: NaiveDateTime) -> Re
     Ok(nome)
 }
 
-/// Antes de um restauro no arranque: move o `banco` atual (danificado ou vazio)
-/// para `versoes\frota_danificado_AAAA-MM-DD_HHMM.db` (nunca sobrescreve). Sem
-/// `banco` não há nada a guardar (`None`). Devolve o nome criado.
-pub fn guardar_danificado(c: &Caminhos, agora: NaiveDateTime) -> Res<Option<String>> {
+/// Antes de um restauro no arranque: move o `banco` atual para `versoes` (nunca
+/// sobrescreve): `frota_danificado_AAAA-MM-DD_HHMM.db` se está danificado,
+/// `frota_posto_de_parte_AAAA-MM-DD_HHMM.db` se está vazio/ilegível (`vazio`).
+/// Sem `banco` não há nada a guardar (`None`). Devolve o nome criado. Um erro
+/// garante que o `banco` ficou no lugar, salvo `CODIGO_MOVER_PARCIAL`.
+pub fn guardar_danificado(c: &Caminhos, agora: NaiveDateTime, vazio: bool) -> Res<Option<String>> {
     if !existe(&c.banco)? {
         return Ok(None);
     }
     let dir = pasta(c)?;
-    let base = format!("{PREFIXO_DANIFICADO}{}", agora.format("%Y-%m-%d_%H%M"));
+    let prefixo = if vazio {
+        PREFIXO_POSTO_DE_PARTE
+    } else {
+        PREFIXO_DANIFICADO
+    };
+    let base = format!("{prefixo}{}", agora.format("%Y-%m-%d_%H%M"));
     let destino = nome_livre(&dir, &base)?;
     mover_base(&c.banco, &destino)?;
     Ok(destino
         .file_name()
         .map(|n| n.to_string_lossy().into_owned()))
+}
+
+/// Alterações da pasta local antiga comprovadamente desta pasta de dados:
+/// snapshot de `conn` em `versoes\frota_legado_AAAA-MM-DD_HHMM.db` (nunca
+/// sobrescreve nem é podado). Devolve o nome criado.
+pub fn copia_legado(conn: &Connection, c: &Caminhos, agora: NaiveDateTime) -> Res<String> {
+    let dir = pasta(c)?;
+    let base = format!("{PREFIXO_LEGADO}{}", agora.format("%Y-%m-%d_%H%M"));
+    let destino = nome_livre(&dir, &base)?;
+    snapshot(conn, &destino)?;
+    Ok(destino
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default())
 }
 
 fn contar(conn: &Connection, sql: &str) -> rusqlite::Result<i64> {
@@ -273,8 +310,9 @@ fn contagens(p: &Path) -> (i64, i64) {
 
 /// `AAAA-MM-DD` (diária), `AAAA-MM-DD HH:MM` (manual) ou a modificação (antes-da).
 fn data_de(nome: &str, mtime: SystemTime) -> String {
-    let datado = nome
-        .strip_prefix(PREFIXO_DANIFICADO)
+    let datado = PREFIXOS_POSTOS_DE_LADO
+        .iter()
+        .find_map(|p| nome.strip_prefix(p))
         .map(|resto| format!("frota_{resto}"));
     if let Some((d, h, _)) = parse_datada(datado.as_deref().unwrap_or(nome)) {
         return if h.is_empty() {
@@ -291,14 +329,17 @@ fn data_de(nome: &str, mtime: SystemTime) -> String {
 pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
     let dir = pasta(c)?;
     let mut v: Vec<Versao> = Vec::new();
-    for (nome, p, mtime) in ficheiros(&dir, |n| eh_datada(n) || eh_antes(n) || eh_danificado(n))? {
+    for (nome, p, mtime) in ficheiros(&dir, |n| eh_datada(n) || eh_antes(n) || eh_posto_de_lado(n))?
+    {
         let (carros, lancamentos) = contagens(&p);
+        let restauravel = !eh_posto_de_lado(&nome) || verificar(&p).is_ok();
         v.push(Versao {
             data: data_de(&nome, mtime),
             tamanho: std::fs::metadata(&p)?.len(),
             nome,
             carros,
             lancamentos,
+            restauravel,
         });
     }
     v.sort_by(|a, b| b.data.cmp(&a.data).then_with(|| b.nome.cmp(&a.nome)));
@@ -321,6 +362,42 @@ fn corrompida() -> Erro {
     }
 }
 
+/// Abre `p` só para leitura e verifica-o: integridade e esquema (não mais
+/// recente do que esta aplicação). Devolve a ligação aberta.
+fn verificar(p: &Path) -> Res<Connection> {
+    // 0 bytes abre como uma base vazia válida: não é uma versão com dados.
+    if std::fs::metadata(p)?.len() == 0 {
+        return Err(corrompida());
+    }
+    let conn = match Connection::open_with_flags(p, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+        Ok(x) => x,
+        Err(rusqlite::Error::SqliteFailure(f, _))
+            if matches!(
+                f.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+            ) =>
+        {
+            return Err(corrompida());
+        }
+        Err(e) => return Err(e.into()),
+    };
+    if !integridade_ok(&conn)? {
+        return Err(corrompida());
+    }
+    // versão criada por uma app mais recente: não a carregamos
+    let uv: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if uv < 0 {
+        return Err(corrompida());
+    }
+    if uv > MIGRACOES.len() as i64 {
+        return Err(Erro { campo: None,
+            codigo: "versao_mais_recente".into(),
+            mensagem: "Esta versão foi criada por uma versão mais recente da aplicação. Nada foi alterado.".into(),
+        });
+    }
+    Ok(conn)
+}
+
 /// Repõe uma versão: verifica-a, guarda uma cópia manual do estado atual
 /// (se `copia_seguranca`; `false` só quando `conn` não tem dados reais, p.ex. a
 /// ligação vazia usada depois de um arranque com o banco corrompido),
@@ -336,7 +413,7 @@ pub fn restaurar(
     if nome.is_empty()
         || nome.contains(['/', '\\'])
         || nome.contains("..")
-        || !(parse_datada(nome).is_some() || eh_antes(nome))
+        || !(parse_datada(nome).is_some() || eh_antes(nome) || eh_posto_de_lado(nome))
     {
         return Err(versao_invalida());
     }
@@ -345,33 +422,9 @@ pub fn restaurar(
     if !existe(&origem)? {
         return Err(versao_invalida());
     }
-    // 1. verificar antes de tocar em qualquer coisa
-    let origem_conn = match Connection::open_with_flags(&origem, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-        Ok(x) => x,
-        Err(rusqlite::Error::SqliteFailure(f, _))
-            if matches!(
-                f.code,
-                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
-            ) =>
-        {
-            return Err(corrompida());
-        }
-        Err(e) => return Err(e.into()),
-    };
-    if !integridade_ok(&origem_conn)? {
-        return Err(corrompida());
-    }
-    // versão criada por uma app mais recente: não a carregamos
-    let uv: i64 = origem_conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if uv < 0 {
-        return Err(corrompida());
-    }
-    if uv > MIGRACOES.len() as i64 {
-        return Err(Erro { campo: None,
-            codigo: "versao_mais_recente".into(),
-            mensagem: "Esta versão foi criada por uma versão mais recente da aplicação. Nada foi alterado.".into(),
-        });
-    }
+    // 1. verificar antes de tocar em qualquer coisa (também os postos de lado:
+    // um `frota_posto_de_parte_*` pode ter dados bons)
+    let origem_conn = verificar(&origem)?;
     // 2. cópia de segurança do estado atual (a poda só acontece no fim)
     let seguranca = if copia_seguranca {
         Some(copia_manual_sem_poda(conn, &dir, agora)?)
@@ -785,17 +838,17 @@ mod testes {
         }
         std::fs::write(&c.banco, vec![0xABu8; 4096]).unwrap();
         let t = dia(40).and_hms_opt(9, 5, 0).unwrap();
-        let nome = guardar_danificado(&c, t).unwrap().unwrap();
+        let nome = guardar_danificado(&c, t, false).unwrap().unwrap();
         assert_eq!(nome, "frota_danificado_2026-02-10_0905.db");
         assert!(!c.banco.exists());
         // segunda vez no mesmo minuto: sufixo, nunca sobrescreve
-        std::fs::write(&c.banco, b"").unwrap();
+        std::fs::write(&c.banco, vec![0xABu8; 4096]).unwrap();
         assert_eq!(
-            guardar_danificado(&c, t).unwrap().unwrap(),
+            guardar_danificado(&c, t, false).unwrap().unwrap(),
             "frota_danificado_2026-02-10_0905-2.db"
         );
         // sem banco: nada a guardar
-        assert_eq!(guardar_danificado(&c, t).unwrap(), None);
+        assert_eq!(guardar_danificado(&c, t, false).unwrap(), None);
         // não conta para as 30 nem é apagado pela poda
         copia_diaria(&c, dia(41)).unwrap_or(false);
         copia_manual(&conn, &c, dia(42).and_hms_opt(8, 0, 0).unwrap()).unwrap();
@@ -805,8 +858,119 @@ mod testes {
         let d = l.iter().find(|v| v.nome == nome).unwrap();
         assert_eq!(d.data, "2026-02-10 09:05");
         assert_eq!((d.carros, d.lancamentos), (-1, -1));
+        assert!(!d.restauravel);
+        // não passa a verificação: recusado sem cópia de segurança nem alterações
+        let antes = nomes(&c, "frota_2").len();
         let e = restaurar(&mut conn, &c, &nome, true, t).unwrap_err();
-        assert_eq!(e.codigo, "versao_invalida");
+        assert_eq!(e.codigo, "corrompido");
+        assert_eq!(nomes(&c, "frota_2").len(), antes);
+        // as cópias normais continuam restauráveis
+        assert!(
+            l.iter()
+                .filter(|v| v.nome.starts_with("frota_2"))
+                .all(|v| v.restauravel)
+        );
+    }
+
+    /// v0.1.1: um ficheiro posto de parte (banco vazio no arranque) que entretanto
+    /// tem dados bons é listado como restaurável e restaura com cópia de segurança.
+    #[test]
+    fn posto_de_parte_com_dados_bons_e_restauravel() {
+        let (_t, c, mut conn) = cenario();
+        inserir_carro(&conn, "AA-00-AA");
+        inserir_carro(&conn, "BB-11-BB");
+        gravar(&conn, &c).unwrap();
+        let t = dia(0).and_hms_opt(9, 0, 0).unwrap();
+        // o "vazio" era um ficheiro ainda por descarregar: depois de posto de parte tem os dados
+        let nome = guardar_danificado(&c, t, true).unwrap().unwrap();
+        assert_eq!(nome, "frota_posto_de_parte_2026-01-01_0900.db");
+        assert!(!c.banco.exists());
+        // um posto de parte ilegível no mesmo minuto não é restaurável
+        std::fs::write(&c.banco, b"").unwrap();
+        let ilegivel = guardar_danificado(&c, t, true).unwrap().unwrap();
+        assert_eq!(ilegivel, "frota_posto_de_parte_2026-01-01_0900-2.db");
+        let l = listar(&c).unwrap();
+        let bom = l.iter().find(|v| v.nome == nome).unwrap();
+        assert!(bom.restauravel);
+        assert_eq!(bom.data, "2026-01-01 09:00");
+        assert_eq!(bom.carros, 2);
+        assert!(!l.iter().find(|v| v.nome == ilegivel).unwrap().restauravel);
+        // estado atual com 1 carro; restaurar o posto de parte (2 carros)
+        conn.execute("DELETE FROM carros WHERE matricula = 'BB-11-BB'", [])
+            .unwrap();
+        let t2 = dia(0).and_hms_opt(10, 0, 0).unwrap();
+        restaurar(&mut conn, &c, &nome, true, t2).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
+        // a cópia de segurança do estado anterior foi feita
+        let seg = listar(&c)
+            .unwrap()
+            .into_iter()
+            .find(|v| v.nome == "frota_2026-01-01_1000.db")
+            .unwrap();
+        assert_eq!(seg.carros, 1);
+        // o posto de parte continua lá (não é podado nem consumido)
+        assert!(c.dados.join("versoes").join(&nome).exists());
+        let e = restaurar(&mut conn, &c, &ilegivel, true, t2).unwrap_err();
+        assert_eq!(e.codigo, "corrompido");
+    }
+
+    #[test]
+    fn danificado_que_passa_a_verificacao_e_restauravel() {
+        let (_t, c, conn) = cenario();
+        inserir_carro(&conn, "AA-00-AA");
+        gravar(&conn, &c).unwrap();
+        let t = dia(0).and_hms_opt(9, 0, 0).unwrap();
+        let nome = guardar_danificado(&c, t, false).unwrap().unwrap();
+        let v = listar(&c).unwrap();
+        assert!(v.iter().find(|x| x.nome == nome).unwrap().restauravel);
+        let mut vazia = Connection::open_in_memory().unwrap();
+        restaurar(&mut vazia, &c, &nome, false, t).unwrap();
+        assert!(c.banco.exists());
+    }
+
+    #[test]
+    fn legado_e_listado_restauravel_e_nunca_podado() {
+        let (_t, c, conn) = cenario();
+        inserir_carro(&conn, "AA-00-AA");
+        let t = dia(0).and_hms_opt(9, 0, 0).unwrap();
+        let nome = copia_legado(&conn, &c, t).unwrap();
+        assert_eq!(nome, "frota_legado_2026-01-01_0900.db");
+        assert_eq!(
+            copia_legado(&conn, &c, t).unwrap(),
+            "frota_legado_2026-01-01_0900-2.db"
+        );
+        for i in 0..31 {
+            copia_diaria(&c, dia(i + 1)).unwrap();
+        }
+        assert_eq!(nomes(&c, "frota_2").len(), 30);
+        assert_eq!(nomes(&c, "frota_legado_").len(), 2);
+        let l = listar(&c).unwrap();
+        let v = l.iter().find(|v| v.nome == nome).unwrap();
+        assert!(v.restauravel);
+        assert_eq!((v.carros, v.data.as_str()), (1, "2026-01-01 09:00"));
+    }
+
+    /// v0.1.1: se o journal não se consegue mover, o banco volta ao lugar.
+    #[cfg(windows)]
+    #[test]
+    fn guardar_danificado_com_journal_preso_deixa_o_banco_no_lugar() {
+        use crate::armazenamento::gravacao::com_sufixo;
+        use crate::armazenamento::gravacao::testes::trancar;
+        let (_t, c, _conn) = cenario();
+        std::fs::write(&c.banco, vec![0xABu8; 4096]).unwrap();
+        let journal = com_sufixo(&c.banco, "-journal");
+        std::fs::write(&journal, b"j").unwrap();
+        let tranca = trancar(&journal); // sem partilha de apagamento: o rename falha
+        let r = guardar_danificado(&c, dia(0).and_hms_opt(9, 0, 0).unwrap(), false);
+        drop(tranca);
+        let e = r.unwrap_err();
+        assert_eq!(e.codigo, "io");
+        assert_eq!(std::fs::read(&c.banco).unwrap(), vec![0xABu8; 4096]);
+        assert!(journal.exists());
+        assert!(nomes(&c, "frota_danificado_").is_empty());
     }
 
     /// I5: uma poda que falha não transforma a cópia/restauro num erro.

@@ -11,9 +11,9 @@ const m = vi.mocked(api)
 afterEach(cleanup)
 
 const versoes: Versao[] = [
-  { nome: 'frota_2026-10-20_1842.db', data: '2026-10-20 18:42', tamanho: 4096, carros: 23, lancamentos: 412 },
-  { nome: 'frota_2026-10-19.db', data: '2026-10-19', tamanho: 4096, carros: 23, lancamentos: 405 },
-  { nome: 'frota_2026-10-18.db', data: '2026-10-18', tamanho: 4096, carros: -1, lancamentos: -1 },
+  { nome: 'frota_2026-10-20_1842.db', data: '2026-10-20 18:42', tamanho: 4096, carros: 23, lancamentos: 412, restauravel: true },
+  { nome: 'frota_2026-10-19.db', data: '2026-10-19', tamanho: 4096, carros: 23, lancamentos: 405, restauravel: true },
+  { nome: 'frota_2026-10-18.db', data: '2026-10-18', tamanho: 4096, carros: -1, lancamentos: -1, restauravel: true },
 ]
 
 beforeEach(() => {
@@ -215,7 +215,7 @@ test('vazio: restaurar continua possível como opção secundária', async () =>
 test('danificado: o ficheiro posto de lado aparece identificado e não é restaurável', async () => {
   m.arranque.mockResolvedValue(danificado)
   m.listarVersoes.mockResolvedValue([
-    { nome: 'frota_danificado_2026-10-20_1900.db', data: '2026-10-20 19:00', tamanho: 4096, carros: -1, lancamentos: -1 },
+    { nome: 'frota_danificado_2026-10-20_1900.db', data: '2026-10-20 19:00', tamanho: 4096, carros: -1, lancamentos: -1, restauravel: false },
     ...versoes,
   ])
   montar()

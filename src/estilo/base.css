@@ -384,6 +384,15 @@ time {
   stroke: var(--laranja);
 }
 
+.aviso-info {
+  background: var(--destaque-suave);
+  color: var(--texto);
+}
+
+.aviso-info .aviso-icone {
+  stroke: var(--destaque);
+}
+
 .aviso strong {
   font-weight: 600;
 }

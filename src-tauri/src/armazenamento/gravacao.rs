@@ -46,6 +46,22 @@ fn banco_vazio() -> Erro {
     }
 }
 
+fn banco_orfao(banco: &Path, orfaos: &[PathBuf]) -> Erro {
+    let nomes: Vec<String> = orfaos
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    Erro {
+        campo: None,
+        codigo: CODIGO_BANCO_ORFAO.into(),
+        mensagem: format!(
+            "O ficheiro de dados ({}) não está na pasta, mas existem ficheiros dele ({}): uma operação anterior ficou a meio. Não foi criada uma base vazia. Veja em Backup (pasta versoes) se há um ficheiro posto de parte e reponha-o como frota.db, ou peça ajuda.",
+            banco.display(),
+            nomes.join(", ")
+        ),
+    }
+}
+
 fn gravacao_falhou(e: impl std::fmt::Display) -> Erro {
     Erro {
         campo: None,
@@ -114,13 +130,39 @@ fn banco_integro(banco: &Path) -> Res<bool> {
 
 /// A cópia de trabalho abre e passa a verificação de integridade? (Abre em
 /// leitura/escrita como o arranque normal, para um journal quente ser revertido.)
+/// `Ok(false)` só quando o SQLite diz que está danificada; um erro de leitura
+/// (ficheiro em uso, ocupado, sem acesso) é `Err` com `CODIGO_TRABALHO_IO`.
 fn trabalho_integro(trabalho: &Path) -> Res<bool> {
-    match Connection::open(trabalho) {
+    let r = match Connection::open(trabalho) {
         Ok(conn) => integridade_ok(&conn),
         Err(rusqlite::Error::SqliteFailure(f, _)) if codigo_corrompido(&f) => Ok(false),
         Err(e) => Err(e.into()),
+    };
+    r.map_err(|e| erro_leitura_trabalho(trabalho, &e.mensagem))
+}
+
+/// Código de `isolar_trabalho_danificado` quando a cópia de trabalho não se
+/// consegue ler (não é o mesmo que estar danificada; tentar de novo pode bastar).
+pub const CODIGO_TRABALHO_IO: &str = "trabalho_io";
+
+fn erro_leitura_trabalho(trabalho: &Path, detalhe: &str) -> Erro {
+    Erro {
+        campo: None,
+        codigo: CODIGO_TRABALHO_IO.into(),
+        mensagem: format!(
+            "Não foi possível ler a cópia local deste PC ({}): {detalhe}. Pode estar em uso por outro programa (p.ex. antivírus ou cópia de segurança). Nada foi alterado; tente de novo.",
+            trabalho.display()
+        ),
     }
 }
+
+/// Código de `mover_base` quando o ficheiro principal foi movido, um auxiliar
+/// não, e não foi possível voltar a pôr o principal no lugar.
+pub const CODIGO_MOVER_PARCIAL: &str = "mover_parcial";
+
+/// Código de `abrir_trabalho` quando o `banco` não existe mas há ficheiros
+/// auxiliares dele (uma operação anterior ficou a meio).
+pub const CODIGO_BANCO_ORFAO: &str = "banco_orfao";
 
 /// Estado do ficheiro `banco` partilhado (sem o modificar).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,15 +223,78 @@ pub(crate) fn nome_livre(dir: &Path, base: &str) -> Res<PathBuf> {
 }
 
 /// Move uma base (e os auxiliares do SQLite) para `destino` (por rename).
+///
+/// Tudo ou nada: se o principal foi movido mas um auxiliar falha, os já movidos
+/// e o principal voltam ao lugar e devolve-se o erro original (nada mudou). Se
+/// nem isso for possível, devolve `CODIGO_MOVER_PARCIAL` (nada é apagado; quem
+/// chama não pode seguir como se o principal não existisse).
 pub(crate) fn mover_base(origem: &Path, destino: &Path) -> Res<()> {
-    std::fs::rename(origem, destino)?;
+    mover_base_com(origem, destino, &|a, b| std::fs::rename(a, b))
+}
+
+type Renomear<'a> = &'a dyn Fn(&Path, &Path) -> std::io::Result<()>;
+
+fn mover_base_com(origem: &Path, destino: &Path, renomear: Renomear) -> Res<()> {
+    renomear(origem, destino)?;
+    let mut movidos: Vec<&str> = Vec::new();
+    let mut falha: Option<Erro> = None;
     for s in AUXILIARES {
         let aux = com_sufixo(origem, s);
-        if existe(&aux)? {
-            std::fs::rename(&aux, com_sufixo(destino, s))?;
+        let r = match existe(&aux) {
+            Ok(false) => continue,
+            Ok(true) => renomear(&aux, &com_sufixo(destino, s)).map_err(Erro::from),
+            Err(e) => Err(e),
+        };
+        match r {
+            Ok(()) => movidos.push(s),
+            Err(e) => {
+                falha = Some(e);
+                break;
+            }
         }
     }
-    Ok(())
+    let Some(e) = falha else { return Ok(()) };
+    // Desfazer: auxiliares já movidos e o principal voltam ao lugar.
+    let mut desfeito = true;
+    for s in movidos.iter().rev() {
+        if let Err(e2) = renomear(&com_sufixo(destino, s), &com_sufixo(origem, s)) {
+            log::error!("não foi possível repor {}{s}: {e2}", origem.display());
+            desfeito = false;
+        }
+    }
+    if let Err(e2) = renomear(destino, origem) {
+        log::error!(
+            "não foi possível repor {} (ficou em {}): {e2}",
+            origem.display(),
+            destino.display()
+        );
+        desfeito = false;
+    }
+    if desfeito {
+        return Err(e);
+    }
+    Err(Erro {
+        campo: None,
+        codigo: CODIGO_MOVER_PARCIAL.into(),
+        mensagem: format!(
+            "Não foi possível mover {} por completo ({}) nem voltar a pô-lo no lugar. O ficheiro pode ter ficado em {}. Nada foi apagado.",
+            origem.display(),
+            e.mensagem,
+            destino.display()
+        ),
+    })
+}
+
+/// Auxiliares do SQLite que existem ao lado de `p` (sem o principal).
+pub(crate) fn auxiliares_de(p: &Path) -> Res<Vec<PathBuf>> {
+    let mut v = Vec::new();
+    for s in AUXILIARES {
+        let aux = com_sufixo(p, s);
+        if existe(&aux)? {
+            v.push(aux);
+        }
+    }
+    Ok(v)
 }
 
 /// Alterações por gravar numa cópia de trabalho que já não abre (danificada neste
@@ -198,7 +303,11 @@ pub(crate) fn mover_base(origem: &Path, destino: &Path) -> Res<()> {
 /// `pendente` é removido e o arranque segue a partir do `banco`. Devolve onde
 /// ficou o ficheiro, ou `None` se não havia nada a fazer.
 pub fn isolar_trabalho_danificado(c: &Caminhos, agora: NaiveDateTime) -> Res<Option<PathBuf>> {
-    if !(existe(&c.pendente)? && existe(&c.trabalho)?) || trabalho_integro(&c.trabalho)? {
+    let ha = existe(&c.pendente)
+        .and_then(|p| Ok(p && existe(&c.trabalho)?))
+        .map_err(|e| erro_leitura_trabalho(&c.trabalho, &e.mensagem))?;
+    // Só uma falha de integridade conta como danificada; erros de leitura sobem.
+    if !ha || trabalho_integro(&c.trabalho)? {
         return Ok(None);
     }
     let local = c.trabalho.parent().unwrap_or(Path::new("."));
@@ -241,7 +350,15 @@ pub fn abrir_trabalho(c: &Caminhos) -> Res<Aberto> {
                 limpar_trabalho(&c.trabalho, false)?;
                 std::fs::copy(&c.banco, &c.trabalho)?;
             }
-            EstadoBanco::Ausente => limpar_trabalho(&c.trabalho, true)?,
+            EstadoBanco::Ausente => {
+                // Sem banco mas com auxiliares dele: uma operação anterior ficou a
+                // meio e o ficheiro pode estar noutro sítio. Nunca criar uma base vazia.
+                let orfaos = auxiliares_de(&c.banco)?;
+                if !orfaos.is_empty() {
+                    return Err(banco_orfao(&c.banco, &orfaos));
+                }
+                limpar_trabalho(&c.trabalho, true)?
+            }
         }
     }
     let mut conn = match Connection::open(&c.trabalho) {
@@ -614,5 +731,112 @@ pub(crate) mod testes {
         std::fs::remove_file(&c.pendente).unwrap();
         std::fs::write(&c.trabalho, vec![0xCDu8; 4096]).unwrap();
         assert_eq!(isolar_trabalho_danificado(&c, agora()).unwrap(), None);
+    }
+
+    // ---------- v0.1.1: renomeações parciais ----------
+
+    /// Base com journal e wal ao lado, em `dir`.
+    fn base_com_auxiliares(dir: &Path) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let p = dir.join("a.db");
+        std::fs::write(&p, b"principal").unwrap();
+        std::fs::write(com_sufixo(&p, "-journal"), b"j").unwrap();
+        std::fs::write(com_sufixo(&p, "-wal"), b"w").unwrap();
+        p
+    }
+
+    #[test]
+    fn mover_base_com_auxiliar_que_falha_volta_tudo_ao_lugar() {
+        let (t, _c) = cenario();
+        let origem = base_com_auxiliares(&t.path().join("o"));
+        let destino = t.path().join("d.db");
+        // o journal move-se, o wal falha
+        let falhar_wal = |a: &Path, b: &Path| {
+            if a.to_string_lossy().ends_with("-wal") {
+                Err(std::io::Error::other("wal em uso"))
+            } else {
+                std::fs::rename(a, b)
+            }
+        };
+        let e = mover_base_com(&origem, &destino, &falhar_wal).unwrap_err();
+        assert_eq!(e.codigo, "io");
+        assert!(e.mensagem.contains("wal em uso"), "{}", e.mensagem);
+        assert_eq!(std::fs::read(&origem).unwrap(), b"principal");
+        assert!(com_sufixo(&origem, "-journal").exists());
+        assert!(com_sufixo(&origem, "-wal").exists());
+        assert!(!destino.exists());
+        assert!(!com_sufixo(&destino, "-journal").exists());
+    }
+
+    #[test]
+    fn mover_base_que_nao_consegue_desfazer_da_erro_parcial() {
+        let (t, _c) = cenario();
+        let origem = base_com_auxiliares(&t.path().join("o"));
+        let destino = t.path().join("d.db");
+        // o journal falha e o principal já não consegue voltar
+        let falhar = |a: &Path, b: &Path| {
+            if a.to_string_lossy().ends_with("-journal") || a == destino.as_path() {
+                Err(std::io::Error::other("em uso"))
+            } else {
+                std::fs::rename(a, b)
+            }
+        };
+        let e = mover_base_com(&origem, &destino, &falhar).unwrap_err();
+        assert_eq!(e.codigo, CODIGO_MOVER_PARCIAL);
+        assert!(
+            e.mensagem.contains(&destino.display().to_string()),
+            "{}",
+            e.mensagem
+        );
+        // nada foi apagado
+        assert_eq!(std::fs::read(&destino).unwrap(), b"principal");
+        assert!(com_sufixo(&origem, "-journal").exists());
+    }
+
+    #[test]
+    fn mover_base_normal_move_tudo() {
+        let (t, _c) = cenario();
+        let origem = base_com_auxiliares(&t.path().join("o"));
+        let destino = t.path().join("d.db");
+        mover_base(&origem, &destino).unwrap();
+        assert!(!origem.exists() && destino.exists());
+        assert!(com_sufixo(&destino, "-journal").exists());
+        assert!(com_sufixo(&destino, "-wal").exists());
+        assert!(!com_sufixo(&origem, "-journal").exists());
+    }
+
+    /// Depois de uma renomeação parcial do `banco`, o arranque nunca cria uma
+    /// base vazia enquanto houver auxiliares dele.
+    #[test]
+    fn sem_banco_mas_com_auxiliares_dele_nao_cria_base_vazia() {
+        let (_t, c) = cenario();
+        std::fs::create_dir_all(&c.dados).unwrap();
+        std::fs::write(com_sufixo(&c.banco, "-journal"), b"j").unwrap();
+        let e = preparar_trabalho(&c).err().unwrap();
+        assert_eq!(e.codigo, CODIGO_BANCO_ORFAO);
+        assert!(e.mensagem.contains("frota.db-journal"), "{}", e.mensagem);
+        assert!(!c.banco.exists());
+        assert!(!c.trabalho.exists());
+    }
+
+    // ---------- v0.1.1: erro de leitura da cópia de trabalho ----------
+
+    #[test]
+    fn trabalho_ilegivel_por_io_nao_conta_como_danificado() {
+        let (_t, c) = cenario();
+        // um diretório no lugar do trabalho: o SQLite não o consegue abrir (não é "danificado")
+        std::fs::create_dir_all(&c.trabalho).unwrap();
+        std::fs::write(&c.pendente, b"").unwrap();
+        let e = isolar_trabalho_danificado(&c, agora()).unwrap_err();
+        assert_eq!(e.codigo, CODIGO_TRABALHO_IO);
+        assert!(
+            e.mensagem.contains("Não foi possível ler"),
+            "{}",
+            e.mensagem
+        );
+        assert!(!e.mensagem.contains("danificad"), "{}", e.mensagem);
+        // nada foi mexido
+        assert!(c.trabalho.is_dir());
+        assert!(c.pendente.exists());
     }
 }

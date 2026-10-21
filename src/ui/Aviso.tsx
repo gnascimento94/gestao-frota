@@ -6,9 +6,12 @@ import { dispensarAviso } from '../api/comandos'
 import { paraErroApi } from '../ecras/comum'
 import type { EstadoGravacao } from './useEstadoArmazenamento'
 
-/** Banner de aviso sobre a gravação. Não mostra nada quando está tudo bem. */
+/**
+ * Banner de aviso sobre a gravação. Não mostra nada quando está tudo bem. Uma `notaGravacao`
+ * (gravado, mas algo secundário falhou) é informativa: nunca aparece como erro.
+ */
 export function Aviso({ estado, falhou }: EstadoGravacao) {
-  let tom: 'erro' | 'alerta' | null = null
+  let tom: 'erro' | 'alerta' | 'info' | null = null
   let titulo = ''
   let texto = ''
   let detalhe: string | null = null
@@ -27,17 +30,30 @@ export function Aviso({ estado, falhou }: EstadoGravacao) {
     tom = 'alerta'
     titulo = 'Não foi possível confirmar o estado da gravação.'
     texto = 'O sistema volta a verificar dentro de momentos.'
+  } else if (estado?.notaGravacao) {
+    tom = 'info'
+    titulo = 'Dados guardados.'
+    texto = estado.notaGravacao
   }
 
   if (!tom) return null
   return (
     <div className={`aviso aviso-${tom}`} role={tom === 'erro' ? 'alert' : 'status'}>
-      <Icone />
+      {tom === 'info' ? <IconeInfo /> : <Icone />}
       <div>
         <strong>{titulo}</strong> {texto}
         {detalhe && <span className="aviso-detalhe">Detalhe: {detalhe}</span>}
       </div>
     </div>
+  )
+}
+
+function IconeInfo() {
+  return (
+    <svg className="aviso-icone" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5.5M12 7.5v.01" />
+    </svg>
   )
 }
 

@@ -2,19 +2,31 @@
 
 import type { Versao } from '../api/tipos'
 
-/** O ficheiro de dados danificado posto de lado antes de um restauro (não é restaurável). */
-export function eDanificada(nome: string): boolean {
-  return /^frota_danificado_.*\.db$/.test(nome)
+/**
+ * Ficheiro posto de lado pelo núcleo (não é uma cópia feita pelo sistema): o ficheiro de dados
+ * danificado ou vazio antes de um restauro, ou alterações de uma versão anterior do programa.
+ * Só serve para o rótulo e para "a cópia mais recente"; se é restaurável decide o núcleo
+ * (`Versao.restauravel`).
+ */
+export function ePostoDeLado(nome: string): boolean {
+  return /^frota_(danificado|posto_de_parte|legado)_.*\.db$/.test(nome)
 }
 
-/** Cópias que se podem restaurar (exclui os ficheiros danificados postos de lado). */
+/** Cópias que se podem restaurar (decide o núcleo, em `restauravel`). */
 export function restauraveis(versoes: Versao[]): Versao[] {
-  return versoes.filter((v) => !eDanificada(v.nome))
+  return versoes.filter((v) => v.restauravel)
+}
+
+/** Cópias feitas pelo sistema (diárias, manuais, antes da atualização), mais recente primeiro. */
+export function copiasDoSistema(versoes: Versao[]): Versao[] {
+  return versoes.filter((v) => !ePostoDeLado(v.nome))
 }
 
 /** Origem da cópia, pelo nome do ficheiro. */
 export function tipoDaVersao(nome: string): string {
-  if (eDanificada(nome)) return 'Ficheiro danificado guardado à parte (não restaurável)'
+  if (/^frota_danificado_.*\.db$/.test(nome)) return 'Ficheiro danificado guardado à parte'
+  if (/^frota_posto_de_parte_.*\.db$/.test(nome)) return 'Ficheiro posto de parte'
+  if (/^frota_legado_.*\.db$/.test(nome)) return 'Alterações por gravar de uma versão anterior do programa'
   const antes = /^frota_antes-da-v(.+)\.db$/.exec(nome)
   if (antes) return `Antes da atualização para a v${antes[1]}`
   if (/^frota_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.db$/.test(nome)) return 'Cópia manual'

@@ -7,7 +7,7 @@ import type { Versao } from '../api/tipos'
 import { Botao } from '../ui/Botao'
 import { formatarDataHora } from '../util/formato'
 import { paraErroApi } from './comum'
-import { contagensDaVersao, eDanificada, tipoDaVersao } from './textosVersoes'
+import { contagensDaVersao, ePostoDeLado, tipoDaVersao } from './textosVersoes'
 
 export function ListaVersoes({
   versoes,
@@ -51,7 +51,7 @@ export function ListaVersoes({
   }
 
   if (versoes.length === 0) return <p className="vazio-lista">Ainda não há cópias.</p>
-  const maisRecente = versoes.find((v) => !eDanificada(v.nome))?.nome
+  const maisRecente = versoes.find((v) => v.restauravel && !ePostoDeLado(v.nome))?.nome
 
   return (
     <>
@@ -72,8 +72,8 @@ export function ListaVersoes({
               </span>
               <span className="item-fim">
                 {v.nome === maisRecente && <span className="pilula pilula-ok">Mais recente</span>}
-                {eDanificada(v.nome) ? (
-                  <span className="pilula pilula-neutra">Danificado</span>
+                {!v.restauravel ? (
+                  <span className="pilula pilula-neutra">Não restaurável</span>
                 ) : (
                   <Botao
                     ref={(b) => {

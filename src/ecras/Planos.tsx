@@ -109,7 +109,6 @@ export function Planos({ ano, versao = 0, soConsulta = false }: { ano: number; v
         </p>
       )}
 
-
       <div className="planos-grelha">
         <Cartao titulo="Planos" semMargem contagem={dados ? visiveis.length : undefined}>
           {dados && visiveis.length === 0 ? (

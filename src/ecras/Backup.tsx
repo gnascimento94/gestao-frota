@@ -5,7 +5,7 @@ import { Botao } from '../ui/Botao'
 import { Cartao } from '../ui/Cartao'
 import { formatarDataHora, formatarQuando } from '../util/formato'
 import { paraErroApi, useCarregar } from './comum'
-import { restauraveis } from './textosVersoes'
+import { copiasDoSistema } from './textosVersoes'
 import { ListaVersoes } from './Versoes'
 
 const MSG_FORA_DO_DRIVE = 'Esta pasta não está no Google Drive — os dados não têm cópia na nuvem.'
@@ -49,7 +49,7 @@ export function Backup({
     onRestaurado()
   }
 
-  const ultima = versoes ? restauraveis(versoes)[0] : undefined
+  const ultima = versoes ? copiasDoSistema(versoes)[0] : undefined
 
   return (
     <div className="backup">
