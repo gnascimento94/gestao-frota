@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
@@ -37,28 +37,44 @@ beforeEach(() => {
   m.listarVersoes.mockResolvedValue(versoes)
   m.fazerCopia.mockResolvedValue(undefined)
   m.restaurarVersao.mockResolvedValue(undefined)
-  m.nomearVersao.mockResolvedValue(undefined)
+  m.nomearVersao.mockResolvedValue('frota_guardada_x_1842__Antes da limpeza.db')
   m.apagarVersao.mockResolvedValue(undefined)
 })
 
-test('dar nome a uma cópia: o nome passa a título e a lista recarrega', async () => {
+const guardada: Versao = {
+  ...versoes[0],
+  nome: 'frota_guardada_2026-01-02_1842__Fecho do ano.db',
+  rotulo: 'Fecho do ano',
+}
+
+test('dar nome a uma cópia: a lista recarrega e o foco vai para o botão da linha renomeada', async () => {
   render(<Backup estado={estado()} onRestaurado={() => {}} />)
   const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
   await userEvent.click(within(lista).getAllByRole('button', { name: 'Nomear' })[0])
   const campo = screen.getByLabelText('Nome da cópia')
   expect(document.activeElement).toBe(campo)
+  expect(screen.getByRole('form', { name: /^Nome da cópia de / })).toBeTruthy()
+  m.listarVersoes.mockResolvedValue([
+    { ...versoes[0], nome: 'frota_guardada_x_1842__Antes da limpeza.db', rotulo: 'Antes da limpeza' },
+    versoes[1],
+  ])
   await userEvent.type(campo, '  Antes da limpeza  {Enter}')
   expect(m.nomearVersao).toHaveBeenCalledWith('frota_x_1842.db', 'Antes da limpeza')
+  const renomear = await screen.findByRole('button', { name: 'Renomear' })
   expect(m.listarVersoes).toHaveBeenCalledTimes(2)
+  await waitFor(() => expect(document.activeElement).toBe(renomear))
+  // o botão diz a que cópia se refere
+  expect(renomear.getAttribute('aria-describedby')).toBeTruthy()
+  expect(document.getElementById(renomear.getAttribute('aria-describedby')!)!.textContent).toBe('Antes da limpeza')
 })
 
-test('uma cópia com nome mostra o nome, a data e "Renomear"; Esc cancela', async () => {
-  m.listarVersoes.mockResolvedValue([{ ...versoes[0], rotulo: 'Fecho do ano' }, versoes[1]])
+test('uma cópia com nome mostra o nome, a data, o tipo de origem e "Renomear"; Esc cancela', async () => {
+  m.listarVersoes.mockResolvedValue([guardada, versoes[1]])
   render(<Backup estado={estado()} onRestaurado={() => {}} />)
   const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
   const linha = within(lista).getAllByRole('listitem')[0]
   expect(within(linha).getByText('Fecho do ano')).toBeTruthy()
-  expect(within(linha).getByText(/, 18:42 · Cópia/)).toBeTruthy()
+  expect(within(linha).getByText(/, 18:42 · Cópia manual/)).toBeTruthy()
   await userEvent.click(within(linha).getByRole('button', { name: 'Renomear' }))
   expect((screen.getByLabelText('Nome da cópia') as HTMLInputElement).value).toBe('Fecho do ano')
   await userEvent.keyboard('{Escape}')
@@ -76,6 +92,7 @@ test('apagar pede confirmação; o erro do núcleo aparece', async () => {
   await userEvent.click(within(dialogo).getByRole('button', { name: 'Apagar' }))
   expect(m.apagarVersao).toHaveBeenCalledWith('frota_2020-01-01.db')
   expect(m.listarVersoes).toHaveBeenCalledTimes(2)
+  await waitFor(() => expect(document.activeElement).toBe(lista))
 
   m.apagarVersao.mockRejectedValueOnce({ codigo: 'io', mensagem: 'Ficheiro em uso' })
   await userEvent.click(within(lista).getAllByRole('button', { name: 'Apagar…' })[0])
@@ -97,6 +114,21 @@ test('no Google Drive não há aviso; o erro de gravação aparece junto da últ
   expect((await screen.findByRole('alert')).textContent).toBe('Acesso negado')
   expect(await screen.findByText(/Última cópia: hoje, 18:42/)).toBeTruthy()
   expect(screen.queryByText(/não está no Google Drive/)).toBeNull()
+})
+
+test('cópias com nome: o tipo vem do ficheiro original e um danificado com nome não é "a mais recente"', async () => {
+  m.listarVersoes.mockResolvedValue([
+    { ...versoes[0], nome: 'frota_guardada_danificado_2030-01-01_0900__Velho.db', rotulo: 'Velho', data: '2030-01-01 09:00' },
+    { ...versoes[0], nome: 'frota_guardada_antes-da-v0.1.0__Primeira.db', rotulo: 'Primeira' },
+    versoes[1],
+  ])
+  render(<Backup estado={estado()} onRestaurado={() => {}} />)
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  const linhas = within(lista).getAllByRole('listitem')
+  expect(within(linhas[0]).getByText(/Ficheiro danificado guardado à parte/)).toBeTruthy()
+  expect(within(linhas[0]).queryByText('Mais recente')).toBeNull()
+  expect(within(linhas[1]).getByText(/Antes da atualização para a v0\.1\.0/)).toBeTruthy()
+  expect(within(linhas[1]).getByText('Mais recente')).toBeTruthy()
 })
 
 test('a última cópia ignora o ficheiro danificado posto de lado', async () => {

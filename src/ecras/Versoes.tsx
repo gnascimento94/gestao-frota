@@ -38,6 +38,19 @@ export function ListaVersoes({
   const [ocupado, setOcupado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const botoes = useRef(new Map<string, HTMLButtonElement>())
+  const refLista = useRef<HTMLUListElement>(null)
+  const idBase = useId()
+  /** Onde pôr o foco quando a ação terminar e a lista recarregar ("lista" = a própria lista). */
+  const [focar, setFocar] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (ocupado || !focar) return
+    const alvo = focar === 'lista' ? refLista.current : botoes.current.get(focar)
+    if (alvo) {
+      alvo.focus()
+      setFocar(null)
+    }
+  }, [ocupado, focar, versoes])
 
   function cancelar() {
     const e = escolha
@@ -45,13 +58,13 @@ export function ListaVersoes({
     if (e) botoes.current.get(`${e.acao}:${e.nome}`)?.focus()
   }
 
-  async function executar(f: () => Promise<void>, depois: () => void) {
+  async function executar<T>(f: () => Promise<T>, depois: (r: T) => void) {
     setOcupado(true)
     setErro(null)
     try {
-      await f()
+      const r = await f()
       setEscolha(null)
-      depois()
+      depois(r)
     } catch (e) {
       setErro(paraErroApi(e).mensagem)
     } finally {
@@ -63,7 +76,7 @@ export function ListaVersoes({
   const maisRecente = versoes.find((v) => v.restauravel && !ePostoDeLado(v.nome))?.nome
   const gerir = !!onAlterada
 
-  function botao(v: Versao, acao: Acao, texto: string, variante?: VarianteBotao) {
+  function botao(v: Versao, idTitulo: string, acao: Acao, texto: string, variante?: VarianteBotao) {
     const chave = `${acao}:${v.nome}`
     return (
       <Botao
@@ -71,6 +84,7 @@ export function ListaVersoes({
           if (b) botoes.current.set(chave, b)
           else botoes.current.delete(chave)
         }}
+        aria-describedby={idTitulo}
         tamanho="pequeno"
         variante={variante}
         disabled={desativado || ocupado}
@@ -92,15 +106,18 @@ export function ListaVersoes({
           {erro}
         </p>
       )}
-      <ul className="lista" aria-label="Cópias disponíveis">
-        {versoes.map((v) => {
+      <ul ref={refLista} tabIndex={-1} className="lista" aria-label="Cópias disponíveis">
+        {versoes.map((v, i) => {
           const quando = formatarDataHora(v.data)
           const acao = escolha?.nome === v.nome ? escolha.acao : null
+          const idTitulo = `${idBase}-${i}`
           return (
             <li key={v.nome} className="item-lista">
               <div className="item-corpo">
                 <span className="item-texto">
-                  <span className="item-titulo">{v.rotulo || quando}</span>
+                  <span id={idTitulo} className="item-titulo">
+                    {v.rotulo || quando}
+                  </span>
                   <span className="item-detalhe">
                     {v.rotulo && `${quando} · `}
                     {tipoDaVersao(v.nome)} · {contagensDaVersao(v)}
@@ -108,12 +125,12 @@ export function ListaVersoes({
                 </span>
                 <span className="item-fim">
                   {v.nome === maisRecente && <span className="pilula pilula-ok">Mais recente</span>}
-                  {gerir && botao(v, 'nomear', v.rotulo ? 'Renomear' : 'Nomear', 'simples')}
-                  {gerir && botao(v, 'apagar', 'Apagar…', 'simples')}
+                  {gerir && botao(v, idTitulo, 'nomear', v.rotulo ? 'Renomear' : 'Nomear', 'simples')}
+                  {gerir && botao(v, idTitulo, 'apagar', 'Apagar…', 'simples')}
                   {!v.restauravel ? (
                     <span className="pilula pilula-neutra">Não restaurável</span>
                   ) : (
-                    botao(v, 'restaurar', rotuloBotao)
+                    botao(v, idTitulo, 'restaurar', rotuloBotao)
                   )}
                 </span>
               </div>
@@ -137,19 +154,29 @@ export function ListaVersoes({
                   variante="perigo"
                   ocupado={ocupado}
                   onCancelar={cancelar}
-                  onConfirmar={() => void executar(() => apagarVersao(v.nome), () => onAlterada?.())}
+                  onConfirmar={() =>
+                    void executar(
+                      () => apagarVersao(v.nome),
+                      () => {
+                        setFocar('lista')
+                        onAlterada?.()
+                      },
+                    )
+                  }
                 />
               )}
               {acao === 'nomear' && (
                 <Nomear
+                  rotuloForm={`Nome da cópia de ${quando}`}
                   inicial={v.rotulo ?? ''}
                   ocupado={ocupado}
                   onCancelar={cancelar}
                   onGuardar={(rotulo) =>
                     void executar(
                       () => nomearVersao(v.nome, rotulo),
-                      () => {
-                        botoes.current.get(`nomear:${v.nome}`)?.focus()
+                      (novo) => {
+                        // o ficheiro muda de nome: o foco vai para o botão da linha nova
+                        setFocar(`nomear:${novo}`)
                         onAlterada?.()
                       },
                     )
@@ -216,11 +243,13 @@ function Confirmacao({
 
 /** Nome da cópia, editado na própria linha. Vazio tira o nome. */
 function Nomear({
+  rotuloForm,
   inicial,
   ocupado,
   onCancelar,
   onGuardar,
 }: {
+  rotuloForm: string
   inicial: string
   ocupado: boolean
   onCancelar(): void
@@ -235,6 +264,7 @@ function Nomear({
   return (
     <form
       className="confirmacao versao-nomear"
+      aria-label={rotuloForm}
       onSubmit={(e) => {
         e.preventDefault()
         if (!ocupado) onGuardar(texto.trim())
@@ -252,7 +282,7 @@ function Nomear({
         value={texto}
         maxLength={MAX_ROTULO}
         placeholder="Ex.: Antes de apagar os carros vendidos"
-        ajuda="Uma cópia com nome nunca é apagada automaticamente. Deixe vazio para tirar o nome."
+        ajuda="Uma cópia com nome nunca é apagada automaticamente. Deixe vazio para tirar o nome (volta a ser uma cópia normal)."
         onChange={(e) => setTexto(e.target.value)}
         disabled={ocupado}
         classeCampo="versao-nomear-campo"

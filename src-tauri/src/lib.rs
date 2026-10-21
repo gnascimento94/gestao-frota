@@ -62,7 +62,14 @@ fn barra_escura() -> bool {
 /// Ícone da janela (barra de tarefas, Alt+Tab): o logo é escuro, por isso com a
 /// barra escura usa-se o logo branco. O ícone do `Frota.exe` é sempre o escuro.
 fn icone_conforme_tema(w: &tauri::WebviewWindow) {
-    let png: &[u8] = if barra_escura() {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    // 0 = ainda não posto, 1 = claro, 2 = escuro: só se troca quando muda.
+    static ATUAL: AtomicU8 = AtomicU8::new(0);
+    let escura = barra_escura();
+    if ATUAL.swap(if escura { 2 } else { 1 }, Ordering::SeqCst) == if escura { 2 } else { 1 } {
+        return;
+    }
+    let png: &[u8] = if escura {
         include_bytes!("../icons/icone-escuro.png")
     } else {
         include_bytes!("../icons/128x128@2x.png")
@@ -225,9 +232,11 @@ pub fn run() {
             });
         }
         // O utilizador mudou o tema do Windows: acompanhar no ícone da janela.
+        // `ThemeChanged` segue o tema das apps; a barra de tarefas tem o seu
+        // (modo personalizado), por isso também se confirma ao ganhar o foco.
         RunEvent::WindowEvent {
             label,
-            event: WindowEvent::ThemeChanged(_),
+            event: WindowEvent::ThemeChanged(_) | WindowEvent::Focused(true),
             ..
         } => {
             if let Some(w) = app.get_webview_window(&label) {

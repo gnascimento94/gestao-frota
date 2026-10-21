@@ -51,9 +51,9 @@ export const listarVersoes = () => invoke<Versao[]>('listar_versoes')
 
 export const restaurarVersao = (nome: string) => invoke<void>('restaurar_versao', { nome })
 
-/** `rotulo` vazio tira o nome. */
+/** `rotulo` vazio tira o nome. Devolve o novo nome do ficheiro da cópia. */
 export const nomearVersao = (nome: string, rotulo: string) =>
-  invoke<void>('nomear_versao', { nome, rotulo })
+  invoke<string>('nomear_versao', { nome, rotulo })
 
 export const apagarVersao = (nome: string) => invoke<void>('apagar_versao', { nome })
 

@@ -102,6 +102,9 @@ pub struct Estado {
     aviso_arranque: Mutex<Option<String>>,
     sujo: AtomicBool,
     raiz: PathBuf,
+    /// `no_google_drive(raiz)`, calculado uma vez (a pasta não muda; evita ir ao
+    /// disco a cada consulta do estado).
+    no_drive: std::sync::OnceLock<bool>,
     pc: String,
     /// `<local>\assinatura`: assinatura do `banco` na última gravação própria.
     assinatura: PathBuf,
@@ -275,6 +278,7 @@ impl Estado {
             aviso_arranque: Mutex::new(None),
             sujo: AtomicBool::new(false),
             raiz: raiz.to_path_buf(),
+            no_drive: std::sync::OnceLock::new(),
             pc: pc.to_string(),
             assinatura: local.join("assinatura"),
             legado: legado.map(Path::to_path_buf),
@@ -923,7 +927,7 @@ impl Estado {
     pub fn armazenamento(&self) -> EstadoArmazenamento {
         EstadoArmazenamento {
             pasta: self.raiz.display().to_string(),
-            no_google_drive: no_google_drive(&self.raiz),
+            no_google_drive: *self.no_drive.get_or_init(|| no_google_drive(&self.raiz)),
             ultima_gravacao: trava(&self.ultima_gravacao)
                 .map(|d| d.format("%Y-%m-%dT%H:%M:%S").to_string()),
             erro: trava(&self.erro_gravacao).clone(),
@@ -955,7 +959,7 @@ impl Estado {
 
     /// Dá/tira o nome de uma versão. Recusado em consulta (a pasta é de outro PC).
     /// Segura `conn` para não se cruzar com cópias, restauros e a poda.
-    pub fn nomear_versao(&self, nome: &str, rotulo: &str) -> Res<()> {
+    pub fn nomear_versao(&self, nome: &str, rotulo: &str) -> Res<String> {
         let _g = trava(&self.conn);
         if self.so_consulta.load(Ordering::SeqCst) {
             return Err(erro_so_consulta());

@@ -9,7 +9,16 @@ import type { Versao } from '../api/tipos'
  * (`Versao.restauravel`).
  */
 export function ePostoDeLado(nome: string): boolean {
-  return /^frota_(danificado|posto_de_parte|legado)_.*\.db$/.test(nome)
+  return /^frota_(danificado|posto_de_parte|legado)_.*\.db$/.test(nomeOriginal(nome))
+}
+
+/**
+ * Uma cópia com nome chama-se `frota_guardada_<original>__<nome>.db`; devolve o nome do ficheiro
+ * original (`frota_<original>.db`), que diz de onde veio a cópia. Sem nome devolve o próprio.
+ */
+export function nomeOriginal(nome: string): string {
+  const m = /^frota_guardada_(.+?)__.+\.db$/.exec(nome)
+  return m ? `frota_${m[1]}.db` : nome
 }
 
 /** Cópias que se podem restaurar (decide o núcleo, em `restauravel`). */
@@ -23,7 +32,8 @@ export function copiasDoSistema(versoes: Versao[]): Versao[] {
 }
 
 /** Origem da cópia, pelo nome do ficheiro. */
-export function tipoDaVersao(nome: string): string {
+export function tipoDaVersao(ficheiro: string): string {
+  const nome = nomeOriginal(ficheiro)
   if (/^frota_danificado_.*\.db$/.test(nome)) return 'Ficheiro danificado guardado à parte'
   if (/^frota_posto_de_parte_.*\.db$/.test(nome)) return 'Ficheiro posto de parte'
   if (/^frota_legado_.*\.db$/.test(nome)) return 'Alterações por gravar de uma versão anterior do programa'

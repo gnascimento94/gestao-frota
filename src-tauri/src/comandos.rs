@@ -72,9 +72,9 @@ pub fn restaurar_versao(e: E<'_>, nome: String) -> Res<()> {
     e.restaurar_versao(&nome, agora())
 }
 
-/// `rotulo` vazio tira o nome.
+/// `rotulo` vazio tira o nome. Devolve o novo nome do ficheiro.
 #[tauri::command(async)]
-pub fn nomear_versao(e: E<'_>, nome: String, rotulo: String) -> Res<()> {
+pub fn nomear_versao(e: E<'_>, nome: String, rotulo: String) -> Res<String> {
     e.nomear_versao(&nome, &rotulo)
 }
 
