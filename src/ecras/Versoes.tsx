@@ -7,7 +7,7 @@ import type { Versao } from '../api/tipos'
 import { Botao } from '../ui/Botao'
 import { formatarDataHora } from '../util/formato'
 import { paraErroApi } from './comum'
-import { contagensDaVersao, tipoDaVersao } from './textosVersoes'
+import { contagensDaVersao, eDanificada, tipoDaVersao } from './textosVersoes'
 
 export function ListaVersoes({
   versoes,
@@ -51,6 +51,7 @@ export function ListaVersoes({
   }
 
   if (versoes.length === 0) return <p className="vazio-lista">Ainda não há cópias.</p>
+  const maisRecente = versoes.find((v) => !eDanificada(v.nome))?.nome
 
   return (
     <>
@@ -60,7 +61,7 @@ export function ListaVersoes({
         </p>
       )}
       <ul className="lista" aria-label="Cópias disponíveis">
-        {versoes.map((v, i) => (
+        {versoes.map((v) => (
           <li key={v.nome} className="item-lista">
             <div className="item-corpo">
               <span className="item-texto">
@@ -70,22 +71,26 @@ export function ListaVersoes({
                 </span>
               </span>
               <span className="item-fim">
-                {i === 0 && <span className="pilula pilula-ok">Mais recente</span>}
-                <Botao
-                  ref={(b) => {
-                    if (b) botoes.current.set(v.nome, b)
-                    else botoes.current.delete(v.nome)
-                  }}
-                  tamanho="pequeno"
-                  disabled={desativado || aRestaurar}
-                  aria-expanded={escolhida === v.nome}
-                  onClick={() => {
-                    setErro(null)
-                    setEscolhida(v.nome)
-                  }}
-                >
-                  {rotuloBotao}
-                </Botao>
+                {v.nome === maisRecente && <span className="pilula pilula-ok">Mais recente</span>}
+                {eDanificada(v.nome) ? (
+                  <span className="pilula pilula-neutra">Danificado</span>
+                ) : (
+                  <Botao
+                    ref={(b) => {
+                      if (b) botoes.current.set(v.nome, b)
+                      else botoes.current.delete(v.nome)
+                    }}
+                    tamanho="pequeno"
+                    disabled={desativado || aRestaurar}
+                    aria-expanded={escolhida === v.nome}
+                    onClick={() => {
+                      setErro(null)
+                      setEscolhida(v.nome)
+                    }}
+                  >
+                    {rotuloBotao}
+                  </Botao>
+                )}
               </span>
             </div>
             {escolhida === v.nome && (

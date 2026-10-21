@@ -2,8 +2,19 @@
 
 import type { Versao } from '../api/tipos'
 
+/** O ficheiro de dados danificado posto de lado antes de um restauro (não é restaurável). */
+export function eDanificada(nome: string): boolean {
+  return /^frota_danificado_.*\.db$/.test(nome)
+}
+
+/** Cópias que se podem restaurar (exclui os ficheiros danificados postos de lado). */
+export function restauraveis(versoes: Versao[]): Versao[] {
+  return versoes.filter((v) => !eDanificada(v.nome))
+}
+
 /** Origem da cópia, pelo nome do ficheiro. */
 export function tipoDaVersao(nome: string): string {
+  if (eDanificada(nome)) return 'Ficheiro danificado guardado à parte (não restaurável)'
   const antes = /^frota_antes-da-v(.+)\.db$/.exec(nome)
   if (antes) return `Antes da atualização para a v${antes[1]}`
   if (/^frota_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.db$/.test(nome)) return 'Cópia manual'

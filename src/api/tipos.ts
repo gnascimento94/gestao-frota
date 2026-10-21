@@ -14,9 +14,13 @@ export type ErroApi = {
 export type Arranque =
   | { estado: 'ok' }
   | { estado: 'bloqueado'; pc: string }
-  | { estado: 'corrompido' }
+  | { estado: 'corrompido'; motivo: MotivoCorrompido; mensagem: string }
   | { estado: 'versaoMaisRecente' }
   | { estado: 'semPasta'; mensagem: string }
+
+/** "vazio": o Google Drive ainda não descarregou o ficheiro (esperar e tentar de novo);
+ *  "danificado": o ficheiro existe mas falha a verificação de integridade. */
+export type MotivoCorrompido = 'vazio' | 'danificado'
 
 export interface EstadoArmazenamento {
   pasta: string
@@ -325,7 +329,11 @@ export interface Painel {
   mes: number
   gastoMes: number
   gastoAno: number
+  /** "Por pagar (hoje)": vencidos + a vencer nos próximos `porPagarDias` dias (carros ativos). */
   porPagar: number
+  porPagarVencido: number
+  porPagarProximo: number
+  porPagarDias: number
   carrosAtivos: number
   alertas: Alerta[]
   recentes: HistoricoItem[]
@@ -351,7 +359,11 @@ export interface Resumo {
   totalPorMes: Record<string, number>
   /** [carroId, total]. */
   porCarro: [number, number][]
+  /** "Por pagar (hoje)": dívida atual (vencidos + próximos `porPagarDias` dias), não do período. */
   porPagar: number
+  porPagarVencido: number
+  porPagarProximo: number
+  porPagarDias: number
 }
 
 export interface FiltroRelatorio {

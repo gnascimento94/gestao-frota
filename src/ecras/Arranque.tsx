@@ -3,9 +3,10 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { abrirConsulta, arranque, listarVersoes } from '../api/comandos'
-import type { Arranque as EstadoArranque } from '../api/tipos'
+import type { Arranque as EstadoArranque, MotivoCorrompido } from '../api/tipos'
 import { Botao } from '../ui/Botao'
 import { paraErroApi, useCarregar } from './comum'
+import { restauraveis } from './textosVersoes'
 import { ListaVersoes } from './Versoes'
 
 type Problema = Exclude<EstadoArranque, { estado: 'ok' }>
@@ -24,6 +25,7 @@ export function Arranque({ children }: { children: ReactNode }) {
   const [fase, setFase] = useState<Fase>({ tipo: 'aVerificar' })
   const [ocupado, setOcupado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  const [tentativas, setTentativas] = useState(0)
 
   useEffect(() => {
     let vivo = true
@@ -39,6 +41,7 @@ export function Arranque({ children }: { children: ReactNode }) {
   const tentarDeNovo = useCallback(async () => {
     setOcupado(true)
     setErro(null)
+    setTentativas((n) => n + 1)
     try {
       setFase(faseDe(await arranque()))
     } catch (e) {
@@ -128,32 +131,120 @@ export function Arranque({ children }: { children: ReactNode }) {
         </EcraArranque>
       )
     case 'corrompido':
-      return <Corrompido onRestaurada={() => setFase({ tipo: 'aberto' })} />
+      return (
+        <Corrompido
+          motivo={p.motivo}
+          mensagem={p.mensagem}
+          tentativas={tentativas}
+          ocupado={ocupado}
+          onTentar={() => void tentarDeNovo()}
+          onRestaurada={() => setFase({ tipo: 'aberto' })}
+        />
+      )
   }
 }
 
-function Corrompido({ onRestaurada }: { onRestaurada(): void }) {
-  const { dados, erro } = useCarregar(listarVersoes)
+const AJUDA_DRIVE =
+  'Também pode recuperar uma versão anterior no Google Drive: em drive.google.com, abra a pasta Frota › dados, clique com o botão direito em frota.db e escolha «Informações do ficheiro › Gerir versões» (histórico de versões do ficheiro frota.db).'
+
+/**
+ * Dados que não abrem. "vazio" (o Google Drive ainda não descarregou o ficheiro): a ação
+ * principal é esperar e "Tentar de novo"; restaurar fica disponível mas em segundo plano.
+ * "danificado": escolher uma cópia para restaurar (o ficheiro danificado é guardado à parte
+ * pelo núcleo). Nunca fica sem saída: sem lista de cópias há "Tentar de novo" e a ajuda do Drive.
+ */
+function Corrompido({
+  motivo,
+  mensagem,
+  tentativas,
+  ocupado,
+  onTentar,
+  onRestaurada,
+}: {
+  motivo: MotivoCorrompido
+  mensagem: string
+  /** Quantas vezes "Tentar de novo" já foi carregado (só no caso "vazio"). */
+  tentativas: number
+  ocupado: boolean
+  onTentar(): void
+  onRestaurada(): void
+}) {
+  const { dados, erro, recarregar } = useCarregar(listarVersoes)
+  const vazio = motivo === 'vazio'
+  const [verCopias, setVerCopias] = useState(!vazio)
+  const copias = dados ? restauraveis(dados) : null
+  const semCopias = erro !== null || (copias !== null && copias.length === 0)
+
+  const botaoLista = (principal: boolean) => (
+    <Botao variante={principal ? 'primario' : 'secundario'} onClick={recarregar}>
+      {principal ? 'Tentar de novo' : 'Ler a lista outra vez'}
+    </Botao>
+  )
+
+  const botoes = vazio ? (
+    <>
+      {!verCopias && (
+        <Botao variante="secundario" onClick={() => setVerCopias(true)}>
+          Restaurar uma cópia…
+        </Botao>
+      )}
+      <Botao variante="primario" onClick={onTentar} disabled={ocupado}>
+        Tentar de novo
+      </Botao>
+    </>
+  ) : semCopias ? (
+    botaoLista(true)
+  ) : undefined
+
   return (
-    <EcraArranque titulo="Os dados da frota estão danificados." largo>
-      <p>
-        Não é possível abrir o ficheiro dos dados. Escolha uma cópia para restaurar — normalmente a mais
-        recente.
-      </p>
-      {erro && (
-        <p className="form-erro" role="alert">
-          {erro}
+    <EcraArranque
+      titulo={vazio ? 'O ficheiro dos dados ainda não está disponível neste PC.' : 'Os dados da frota estão danificados.'}
+      largo={verCopias}
+      botoes={botoes}
+    >
+      <p>{mensagem}</p>
+      {vazio && tentativas > 0 && (
+        <p className="texto-discreto" role="status">
+          Ainda não está disponível. Espere que a sincronização termine e tente de novo.
         </p>
       )}
-      {dados && (
-        <div className="arranque-versoes">
-          <ListaVersoes
-            versoes={dados}
-            rotuloBotao="Restaurar esta"
-            textoConfirmacao="Os dados danificados são substituídos por esta cópia."
-            onRestaurada={onRestaurada}
-          />
-        </div>
+      {verCopias && (
+        <>
+          {vazio ? (
+            <p>
+              Só restaure uma cópia se o ficheiro não voltar a ficar disponível: a cópia pode ser mais antiga do
+              que os dados atuais.
+            </p>
+          ) : (
+            <p>
+              Escolha uma cópia para restaurar — normalmente a mais recente. O ficheiro danificado é guardado à
+              parte, em Backup.
+            </p>
+          )}
+          {erro && (
+            <p className="form-erro" role="alert">
+              Não foi possível ler a lista de cópias: {erro}
+            </p>
+          )}
+          {semCopias ? (
+            <>
+              {!erro && <p>Não há cópias guardadas nesta pasta.</p>}
+              <p className="texto-discreto">{AJUDA_DRIVE}</p>
+              {vazio && <div className="arranque-botoes">{botaoLista(false)}</div>}
+            </>
+          ) : (
+            dados && (
+              <div className="arranque-versoes">
+                <ListaVersoes
+                  versoes={dados}
+                  rotuloBotao="Restaurar esta"
+                  textoConfirmacao="O ficheiro atual é guardado à parte (em Backup) e substituído por esta cópia."
+                  onRestaurada={onRestaurada}
+                />
+              </div>
+            )
+          )}
+        </>
       )}
     </EcraArranque>
   )

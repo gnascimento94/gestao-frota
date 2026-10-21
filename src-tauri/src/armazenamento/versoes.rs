@@ -1,4 +1,4 @@
-use crate::armazenamento::gravacao::{Caminhos, gravar, integridade_ok};
+use crate::armazenamento::gravacao::{Caminhos, gravar, integridade_ok, mover_base, nome_livre};
 use crate::erro::{Erro, Res};
 use crate::migracoes::{MIGRACOES, migrar};
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime};
@@ -10,6 +10,9 @@ const MAX_DIARIAS: usize = 30;
 const MAX_ANTES_DA: usize = 5;
 const PREFIXO_DATADA: &str = "frota_2";
 const PREFIXO_ANTES: &str = "frota_antes-da-";
+/// `frota_danificado_AAAA-MM-DD_HHMM.db`: o `banco` danificado posto de lado antes
+/// de um restauro no arranque. Nunca é podado nem restaurável (só listado).
+pub const PREFIXO_DANIFICADO: &str = "frota_danificado_";
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +40,18 @@ fn eh_datada(nome: &str) -> bool {
 
 fn eh_antes(nome: &str) -> bool {
     nome.starts_with(PREFIXO_ANTES) && nome.ends_with(".db")
+}
+
+fn eh_danificado(nome: &str) -> bool {
+    nome.starts_with(PREFIXO_DANIFICADO) && nome.ends_with(".db")
+}
+
+/// A poda é uma arrumação: um erro aqui fica no registo e nunca transforma uma
+/// cópia ou um restauro bem-sucedidos num erro.
+fn podar_sem_falhar(r: Res<()>) {
+    if let Err(e) = r {
+        log::warn!("não foi possível podar as versões antigas: {}", e.mensagem);
+    }
 }
 
 /// Ficheiros da pasta que satisfazem `filtro`: (nome, caminho, modificação).
@@ -177,7 +192,7 @@ pub fn copia_diaria(c: &Caminhos, hoje: NaiveDate) -> Res<bool> {
         return Ok(false);
     }
     copiar_banco(c, &destino)?;
-    podar_datadas(&dir, &[&nome])?;
+    podar_sem_falhar(podar_datadas(&dir, &[&nome]));
     Ok(true)
 }
 
@@ -194,7 +209,7 @@ pub fn copia_antes_de(c: &Caminhos, versao: &str) -> Res<()> {
         return Ok(());
     }
     copiar_banco(c, &destino)?;
-    podar_antes(&dir, &[&nome])?;
+    podar_sem_falhar(podar_antes(&dir, &[&nome]));
     Ok(())
 }
 
@@ -217,8 +232,24 @@ fn copia_manual_sem_poda(conn: &Connection, dir: &Path, agora: NaiveDateTime) ->
 pub fn copia_manual(conn: &Connection, c: &Caminhos, agora: NaiveDateTime) -> Res<String> {
     let dir = pasta(c)?;
     let nome = copia_manual_sem_poda(conn, &dir, agora)?;
-    podar_datadas(&dir, &[&nome])?;
+    podar_sem_falhar(podar_datadas(&dir, &[&nome]));
     Ok(nome)
+}
+
+/// Antes de um restauro no arranque: move o `banco` atual (danificado ou vazio)
+/// para `versoes\frota_danificado_AAAA-MM-DD_HHMM.db` (nunca sobrescreve). Sem
+/// `banco` não há nada a guardar (`None`). Devolve o nome criado.
+pub fn guardar_danificado(c: &Caminhos, agora: NaiveDateTime) -> Res<Option<String>> {
+    if !existe(&c.banco)? {
+        return Ok(None);
+    }
+    let dir = pasta(c)?;
+    let base = format!("{PREFIXO_DANIFICADO}{}", agora.format("%Y-%m-%d_%H%M"));
+    let destino = nome_livre(&dir, &base)?;
+    mover_base(&c.banco, &destino)?;
+    Ok(destino
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned()))
 }
 
 fn contar(conn: &Connection, sql: &str) -> rusqlite::Result<i64> {
@@ -242,7 +273,10 @@ fn contagens(p: &Path) -> (i64, i64) {
 
 /// `AAAA-MM-DD` (diária), `AAAA-MM-DD HH:MM` (manual) ou a modificação (antes-da).
 fn data_de(nome: &str, mtime: SystemTime) -> String {
-    if let Some((d, h, _)) = parse_datada(nome) {
+    let datado = nome
+        .strip_prefix(PREFIXO_DANIFICADO)
+        .map(|resto| format!("frota_{resto}"));
+    if let Some((d, h, _)) = parse_datada(datado.as_deref().unwrap_or(nome)) {
         return if h.is_empty() {
             d
         } else {
@@ -257,7 +291,7 @@ fn data_de(nome: &str, mtime: SystemTime) -> String {
 pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
     let dir = pasta(c)?;
     let mut v: Vec<Versao> = Vec::new();
-    for (nome, p, mtime) in ficheiros(&dir, |n| eh_datada(n) || eh_antes(n))? {
+    for (nome, p, mtime) in ficheiros(&dir, |n| eh_datada(n) || eh_antes(n) || eh_danificado(n))? {
         let (carros, lancamentos) = contagens(&p);
         v.push(Versao {
             data: data_de(&nome, mtime),
@@ -290,14 +324,15 @@ fn corrompida() -> Erro {
 /// Repõe uma versão: verifica-a, guarda uma cópia manual do estado atual
 /// (se `copia_seguranca`; `false` só quando `conn` não tem dados reais, p.ex. a
 /// ligação vazia usada depois de um arranque com o banco corrompido),
-/// carrega-a em `conn`, migra e grava.
+/// carrega-a em `conn`, migra e grava. Devolve o aviso de `gravar` (gravado mas
+/// o marcador ficou). A poda das versões antigas é feita sem falhar.
 pub fn restaurar(
     conn: &mut Connection,
     c: &Caminhos,
     nome: &str,
     copia_seguranca: bool,
     agora: NaiveDateTime,
-) -> Res<()> {
+) -> Res<Option<String>> {
     if nome.is_empty()
         || nome.contains(['/', '\\'])
         || nome.contains("..")
@@ -328,6 +363,9 @@ pub fn restaurar(
     }
     // versão criada por uma app mais recente: não a carregamos
     let uv: i64 = origem_conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if uv < 0 {
+        return Err(corrompida());
+    }
     if uv > MIGRACOES.len() as i64 {
         return Err(Erro { campo: None,
             codigo: "versao_mais_recente".into(),
@@ -355,14 +393,14 @@ pub fn restaurar(
     }
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
     migrar(conn)?;
-    gravar(conn, c)?;
+    let aviso = gravar(conn, c)?;
     // 4. só agora se poda, protegendo a cópia de segurança e a versão usada
-    match &seguranca {
-        Some(s) => podar_datadas(&dir, &[s, nome])?,
-        None => podar_datadas(&dir, &[nome])?,
-    }
-    podar_antes(&dir, &[nome])?;
-    Ok(())
+    podar_sem_falhar(match &seguranca {
+        Some(s) => podar_datadas(&dir, &[s, nome]),
+        None => podar_datadas(&dir, &[nome]),
+    });
+    podar_sem_falhar(podar_antes(&dir, &[nome]));
+    Ok(aviso)
 }
 
 #[cfg(test)]
@@ -737,5 +775,64 @@ mod testes {
             .query_row("SELECT COUNT(*) FROM carros", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn danificado_fica_listado_nao_e_podado_nem_restauravel() {
+        let (_t, c, mut conn) = cenario();
+        for i in 0..30 {
+            copia_diaria(&c, dia(i)).unwrap();
+        }
+        std::fs::write(&c.banco, vec![0xABu8; 4096]).unwrap();
+        let t = dia(40).and_hms_opt(9, 5, 0).unwrap();
+        let nome = guardar_danificado(&c, t).unwrap().unwrap();
+        assert_eq!(nome, "frota_danificado_2026-02-10_0905.db");
+        assert!(!c.banco.exists());
+        // segunda vez no mesmo minuto: sufixo, nunca sobrescreve
+        std::fs::write(&c.banco, b"").unwrap();
+        assert_eq!(
+            guardar_danificado(&c, t).unwrap().unwrap(),
+            "frota_danificado_2026-02-10_0905-2.db"
+        );
+        // sem banco: nada a guardar
+        assert_eq!(guardar_danificado(&c, t).unwrap(), None);
+        // não conta para as 30 nem é apagado pela poda
+        copia_diaria(&c, dia(41)).unwrap_or(false);
+        copia_manual(&conn, &c, dia(42).and_hms_opt(8, 0, 0).unwrap()).unwrap();
+        assert_eq!(nomes(&c, "frota_2").len(), 30);
+        assert_eq!(nomes(&c, "frota_danificado_").len(), 2);
+        let l = listar(&c).unwrap();
+        let d = l.iter().find(|v| v.nome == nome).unwrap();
+        assert_eq!(d.data, "2026-02-10 09:05");
+        assert_eq!((d.carros, d.lancamentos), (-1, -1));
+        let e = restaurar(&mut conn, &c, &nome, true, t).unwrap_err();
+        assert_eq!(e.codigo, "versao_invalida");
+    }
+
+    /// I5: uma poda que falha não transforma a cópia/restauro num erro.
+    #[cfg(windows)]
+    #[test]
+    fn poda_que_falha_nao_e_erro() {
+        use crate::armazenamento::gravacao::testes::trancar;
+        let (_t, c, mut conn) = cenario();
+        for i in 0..30 {
+            copia_diaria(&c, dia(i)).unwrap();
+        }
+        let velha = c.dados.join("versoes").join("frota_2026-01-01.db");
+        let tranca = trancar(&velha); // em uso: não se apaga
+        let r1 = copia_diaria(&c, dia(30));
+        let r2 = copia_manual(&conn, &c, dia(31).and_hms_opt(10, 0, 0).unwrap());
+        let r3 = restaurar(
+            &mut conn,
+            &c,
+            "frota_2026-01-05.db",
+            true,
+            dia(31).and_hms_opt(11, 0, 0).unwrap(),
+        );
+        drop(tranca);
+        assert!(r1.unwrap());
+        assert_eq!(r2.unwrap(), "frota_2026-02-01_1000.db");
+        r3.unwrap();
+        assert!(velha.exists());
     }
 }

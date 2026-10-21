@@ -13,6 +13,15 @@ pub fn migrar(conn: &mut Connection) -> Res<()> {
 
 pub fn migrar_com(conn: &mut Connection, migracoes: &[&str]) -> Res<()> {
     let atual = versao_esquema(conn)?;
+    if atual < 0 {
+        // `skip(atual as usize)` com um negativo saltaria todas as migrações.
+        return Err(Erro {
+            campo: None,
+            codigo: "corrompido".into(),
+            mensagem: "O ficheiro de dados tem uma versão de esquema inválida. Nada foi alterado."
+                .into(),
+        });
+    }
     if atual > migracoes.len() as i64 {
         return Err(Erro { campo: None,
             codigo: "versao_mais_recente".into(),
@@ -83,6 +92,15 @@ mod testes {
             contar(&c, "SELECT COUNT(*) FROM sqlite_master WHERE name='x'"),
             0
         );
+    }
+
+    #[test]
+    fn user_version_negativo_e_recusado() {
+        let mut c = mem();
+        c.execute_batch("PRAGMA user_version=-1").unwrap();
+        let e = migrar(&mut c).unwrap_err();
+        assert_eq!(e.codigo, "corrompido");
+        assert_eq!(versao_esquema(&c).unwrap(), -1);
     }
 
     #[test]

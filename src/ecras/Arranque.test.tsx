@@ -25,6 +25,25 @@ beforeEach(() => {
 
 const App = () => <p>Aplicação aberta</p>
 
+const danificado = {
+  estado: 'corrompido',
+  motivo: 'danificado',
+  mensagem: 'O ficheiro de dados parece estar danificado. Nada foi alterado.',
+} as const
+const vazio = {
+  estado: 'corrompido',
+  motivo: 'vazio',
+  mensagem: 'O ficheiro de dados está vazio ou incompleto. Confirme que a pasta Frota está marcada como "Disponível offline".',
+} as const
+
+function montar() {
+  return render(
+    <Arranque>
+      <App />
+    </Arranque>,
+  )
+}
+
 test('bloqueado mostra o nome do PC e permite abrir só para consulta', async () => {
   m.arranque.mockResolvedValue({ estado: 'bloqueado', pc: 'ESCRITORIO-2' })
   render(
@@ -80,7 +99,7 @@ test('ok abre logo a aplicação', async () => {
 })
 
 test('corrompido oferece restaurar a versão mais recente', async () => {
-  m.arranque.mockResolvedValue({ estado: 'corrompido' })
+  m.arranque.mockResolvedValue(danificado)
   render(
     <Arranque>
       <App />
@@ -99,7 +118,7 @@ test('corrompido oferece restaurar a versão mais recente', async () => {
 })
 
 test('restaurar pede confirmação antes de chamar restaurarVersao', async () => {
-  m.arranque.mockResolvedValue({ estado: 'corrompido' })
+  m.arranque.mockResolvedValue(danificado)
   const confirmar = vi.spyOn(window, 'confirm')
   render(
     <Arranque>
@@ -125,7 +144,7 @@ test('restaurar pede confirmação antes de chamar restaurarVersao', async () =>
 })
 
 test('erro ao restaurar fica à vista e não abre a aplicação', async () => {
-  m.arranque.mockResolvedValue({ estado: 'corrompido' })
+  m.arranque.mockResolvedValue(danificado)
   m.restaurarVersao.mockRejectedValue({
     codigo: 'corrompido',
     mensagem: 'A versão escolhida parece estar danificada. Nada foi alterado.',
@@ -166,4 +185,65 @@ test('sem pasta mostra a mensagem do núcleo e permite tentar de novo', async ()
   await userEvent.click(screen.getByRole('button', { name: 'Tentar de novo' }))
   expect(m.arranque).toHaveBeenCalledTimes(2)
   expect(screen.queryByRole('button', { name: 'Abrir só para consulta' })).toBeNull()
+})
+
+test('vazio: "Tentar de novo" é a ação principal e abre quando o ficheiro chega', async () => {
+  m.arranque.mockResolvedValueOnce(vazio).mockResolvedValueOnce(vazio).mockResolvedValueOnce({ estado: 'ok' })
+  montar()
+  expect(await screen.findByText(/Disponível offline/)).toBeTruthy()
+  expect(screen.getByText('O ficheiro dos dados ainda não está disponível neste PC.')).toBeTruthy()
+  // restaurar fica em segundo plano: a lista não aparece logo
+  expect(screen.queryByRole('list', { name: 'Cópias disponíveis' })).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+  expect(await screen.findByText(/Ainda não está disponível/)).toBeTruthy()
+  await userEvent.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+  expect(await screen.findByText('Aplicação aberta')).toBeTruthy()
+  expect(m.arranque).toHaveBeenCalledTimes(3)
+  expect(m.restaurarVersao).not.toHaveBeenCalled()
+})
+
+test('vazio: restaurar continua possível como opção secundária', async () => {
+  m.arranque.mockResolvedValue(vazio)
+  montar()
+  await userEvent.click(await screen.findByRole('button', { name: 'Restaurar uma cópia…' }))
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  expect(within(lista).getAllByRole('button', { name: 'Restaurar esta' })).toHaveLength(3)
+  expect(screen.getByText(/a cópia pode ser mais antiga/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Tentar de novo' })).toBeTruthy()
+})
+
+test('danificado: o ficheiro posto de lado aparece identificado e não é restaurável', async () => {
+  m.arranque.mockResolvedValue(danificado)
+  m.listarVersoes.mockResolvedValue([
+    { nome: 'frota_danificado_2026-10-20_1900.db', data: '2026-10-20 19:00', tamanho: 4096, carros: -1, lancamentos: -1 },
+    ...versoes,
+  ])
+  montar()
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  const linhas = within(lista).getAllByRole('listitem')
+  expect(within(linhas[0]).getByText(/Ficheiro danificado guardado à parte/)).toBeTruthy()
+  expect(within(linhas[0]).queryByRole('button')).toBeNull()
+  // "Mais recente" fica na primeira cópia restaurável
+  expect(within(linhas[1]).getByText('Mais recente')).toBeTruthy()
+})
+
+test('danificado sem cópias: não fica sem saída (tentar de novo + ajuda do Drive)', async () => {
+  m.arranque.mockResolvedValue(danificado)
+  m.listarVersoes.mockResolvedValueOnce([]).mockResolvedValueOnce(versoes)
+  montar()
+  expect(await screen.findByText('Não há cópias guardadas nesta pasta.')).toBeTruthy()
+  expect(screen.getByText(/histórico de versões do ficheiro frota\.db/)).toBeTruthy()
+  await userEvent.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+  expect(await screen.findByRole('list', { name: 'Cópias disponíveis' })).toBeTruthy()
+  expect(m.listarVersoes).toHaveBeenCalledTimes(2)
+})
+
+test('danificado com a lista a falhar: mostra o erro, a ajuda e "Tentar de novo"', async () => {
+  m.arranque.mockResolvedValue(danificado)
+  m.listarVersoes.mockRejectedValueOnce({ codigo: 'io', mensagem: 'Acesso negado' }).mockResolvedValueOnce(versoes)
+  montar()
+  expect(await screen.findByText(/Não foi possível ler a lista de cópias: Acesso negado/)).toBeTruthy()
+  expect(screen.getByText(/Gerir versões/)).toBeTruthy()
+  await userEvent.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+  expect(await screen.findByRole('list', { name: 'Cópias disponíveis' })).toBeTruthy()
 })

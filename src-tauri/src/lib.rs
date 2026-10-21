@@ -28,8 +28,9 @@ fn raiz() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// `%LOCALAPPDATA%\Frota` (cópia de trabalho e marcador `pendente`).
-fn local() -> PathBuf {
+/// `%LOCALAPPDATA%\Frota`: pasta local antiga (uma só para todas as pastas de
+/// dados) e base das pastas locais por pasta de dados.
+fn base_local() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
@@ -73,8 +74,18 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let (estado, arranque) =
-                Estado::arrancar(&raiz(), &local(), &nome_pc(), Local::now().naive_local());
+            // Cópia de trabalho, `pendente` e `assinatura` em
+            // `%LOCALAPPDATA%\Frota\<hash da pasta de dados>\` (uma por pasta; a pasta antiga partilhada é migrada no arranque).
+            let raiz = raiz();
+            let base = base_local();
+            let local = estado::pasta_local(&base, &raiz);
+            let (estado, arranque) = Estado::arrancar_com_legado(
+                &raiz,
+                &local,
+                Some(&base),
+                &nome_pc(),
+                Local::now().naive_local(),
+            );
             log::info!("arranque: {arranque:?}");
             app.manage(estado);
             // Depois de uma atualização: apagar `Frota.old.exe`. O processo antigo
