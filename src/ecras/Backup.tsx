@@ -89,6 +89,7 @@ export function Backup({
           )}
           <p className="texto-discreto">
             O sistema guarda uma cópia por dia, ao fechar, e outra antes de cada atualização do programa.
+            Ficam as 30 mais recentes; as cópias a que der um nome nunca são apagadas automaticamente.
           </p>
         </div>
       </Cartao>
@@ -117,6 +118,7 @@ export function Backup({
             textoConfirmacao="O estado atual é guardado antes de restaurar."
             desativado={soConsulta}
             onRestaurada={aoRestaurar}
+            onAlterada={recarregar}
           />
         )}
       </Cartao>

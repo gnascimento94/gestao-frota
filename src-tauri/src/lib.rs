@@ -44,6 +44,34 @@ fn nome_pc() -> String {
         .unwrap_or_else(|| "desconhecido".into())
 }
 
+/// A barra de tarefas está em modo escuro? (`SystemUsesLightTheme` = 0)
+#[cfg(windows)]
+fn barra_escura() -> bool {
+    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_value::<u32, _>("SystemUsesLightTheme"))
+        .is_ok_and(|v| v == 0)
+}
+
+#[cfg(not(windows))]
+fn barra_escura() -> bool {
+    false
+}
+
+/// Ícone da janela (barra de tarefas, Alt+Tab): o logo é escuro, por isso com a
+/// barra escura usa-se o logo branco. O ícone do `Frota.exe` é sempre o escuro.
+fn icone_conforme_tema(w: &tauri::WebviewWindow) {
+    let png: &[u8] = if barra_escura() {
+        include_bytes!("../icons/icone-escuro.png")
+    } else {
+        include_bytes!("../icons/128x128@2x.png")
+    };
+    if let Err(e) = tauri::image::Image::from_bytes(png).and_then(|i| w.set_icon(i)) {
+        log::warn!("não foi possível mudar o ícone da janela: {e}");
+    }
+}
+
 /// Grava, faz a cópia diária e liberta o lock (só atua uma vez).
 fn fechar(app: &tauri::AppHandle) {
     if let Some(e) = app.try_state::<Estado>() {
@@ -76,6 +104,9 @@ pub fn run() {
             }
             // Cópia de trabalho, `pendente` e `assinatura` em
             // `%LOCALAPPDATA%\Frota\<hash da pasta de dados>\` (uma por pasta; a pasta antiga partilhada é migrada no arranque).
+            if let Some(w) = app.get_webview_window("main") {
+                icone_conforme_tema(&w);
+            }
             let raiz = raiz();
             let base = base_local();
             let local = estado::pasta_local(&base, &raiz);
@@ -125,6 +156,8 @@ pub fn run() {
             comandos::fazer_copia,
             comandos::listar_versoes,
             comandos::restaurar_versao,
+            comandos::nomear_versao,
+            comandos::apagar_versao,
             comandos::verificar_atualizacao,
             comandos::aplicar_atualizacao,
             comandos::carros_listar,
@@ -190,6 +223,16 @@ pub fn run() {
                     }
                 }
             });
+        }
+        // O utilizador mudou o tema do Windows: acompanhar no ícone da janela.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::ThemeChanged(_),
+            ..
+        } => {
+            if let Some(w) = app.get_webview_window(&label) {
+                icone_conforme_tema(&w);
+            }
         }
         // Saída por outro caminho (p.ex. última janela destruída): `fechar` só atua uma vez.
         RunEvent::ExitRequested { .. } | RunEvent::Exit => fechar(app),

@@ -53,6 +53,8 @@ export interface Versao {
   lancamentos: number
   /** O núcleo deixa restaurar esta versão (os ficheiros postos de lado só se passarem a verificação). */
   restauravel: boolean
+  /** Nome dado pelo utilizador; uma cópia com nome nunca é apagada automaticamente. */
+  rotulo?: string | null
 }
 
 // ---------- carros ----------

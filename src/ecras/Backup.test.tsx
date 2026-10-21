@@ -37,6 +37,50 @@ beforeEach(() => {
   m.listarVersoes.mockResolvedValue(versoes)
   m.fazerCopia.mockResolvedValue(undefined)
   m.restaurarVersao.mockResolvedValue(undefined)
+  m.nomearVersao.mockResolvedValue(undefined)
+  m.apagarVersao.mockResolvedValue(undefined)
+})
+
+test('dar nome a uma cópia: o nome passa a título e a lista recarrega', async () => {
+  render(<Backup estado={estado()} onRestaurado={() => {}} />)
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  await userEvent.click(within(lista).getAllByRole('button', { name: 'Nomear' })[0])
+  const campo = screen.getByLabelText('Nome da cópia')
+  expect(document.activeElement).toBe(campo)
+  await userEvent.type(campo, '  Antes da limpeza  {Enter}')
+  expect(m.nomearVersao).toHaveBeenCalledWith('frota_x_1842.db', 'Antes da limpeza')
+  expect(m.listarVersoes).toHaveBeenCalledTimes(2)
+})
+
+test('uma cópia com nome mostra o nome, a data e "Renomear"; Esc cancela', async () => {
+  m.listarVersoes.mockResolvedValue([{ ...versoes[0], rotulo: 'Fecho do ano' }, versoes[1]])
+  render(<Backup estado={estado()} onRestaurado={() => {}} />)
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  const linha = within(lista).getAllByRole('listitem')[0]
+  expect(within(linha).getByText('Fecho do ano')).toBeTruthy()
+  expect(within(linha).getByText(/, 18:42 · Cópia/)).toBeTruthy()
+  await userEvent.click(within(linha).getByRole('button', { name: 'Renomear' }))
+  expect((screen.getByLabelText('Nome da cópia') as HTMLInputElement).value).toBe('Fecho do ano')
+  await userEvent.keyboard('{Escape}')
+  expect(screen.queryByLabelText('Nome da cópia')).toBeNull()
+  expect(m.nomearVersao).not.toHaveBeenCalled()
+})
+
+test('apagar pede confirmação; o erro do núcleo aparece', async () => {
+  render(<Backup estado={estado()} onRestaurado={() => {}} />)
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  await userEvent.click(within(lista).getAllByRole('button', { name: 'Apagar…' })[1])
+  expect(m.apagarVersao).not.toHaveBeenCalled()
+  const dialogo = screen.getByRole('alertdialog')
+  expect(within(dialogo).getByText(/Não é possível desfazer/)).toBeTruthy()
+  await userEvent.click(within(dialogo).getByRole('button', { name: 'Apagar' }))
+  expect(m.apagarVersao).toHaveBeenCalledWith('frota_2020-01-01.db')
+  expect(m.listarVersoes).toHaveBeenCalledTimes(2)
+
+  m.apagarVersao.mockRejectedValueOnce({ codigo: 'io', mensagem: 'Ficheiro em uso' })
+  await userEvent.click(within(lista).getAllByRole('button', { name: 'Apagar…' })[0])
+  await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Apagar' }))
+  expect((await screen.findByRole('alert')).textContent).toBe('Ficheiro em uso')
 })
 
 test('mostra a última cópia, a pasta, o aviso fora do Drive e a versão', async () => {
@@ -78,7 +122,7 @@ test('ficheiro posto de parte: rótulo próprio e restaurável só quando o núc
   expect(within(linhas[0]).getByText(/Ficheiro posto de parte/)).toBeTruthy()
   expect(within(linhas[0]).queryByText(/danificado/i)).toBeNull()
   expect(within(linhas[0]).getByRole('button', { name: 'Restaurar…' })).toBeTruthy()
-  expect(within(linhas[1]).queryByRole('button')).toBeNull()
+  expect(within(linhas[1]).queryByRole('button', { name: 'Restaurar…' })).toBeNull()
   expect(within(linhas[1]).getByText('Não restaurável')).toBeTruthy()
   // o nome não decide: um "danificado" que passa a verificação é restaurável
   expect(within(linhas[2]).getByRole('button', { name: 'Restaurar…' })).toBeTruthy()
@@ -124,6 +168,7 @@ test('só para consulta desativa as ações', async () => {
   render(<Backup estado={estado({ soConsulta: true })} onRestaurado={() => {}} />)
   const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
   expect((screen.getByRole('button', { name: 'Fazer cópia agora' }) as HTMLButtonElement).disabled).toBe(true)
-  for (const b of within(lista).getAllByRole('button', { name: 'Restaurar…' }))
-    expect((b as HTMLButtonElement).disabled).toBe(true)
+  for (const nome of ['Restaurar…', 'Nomear', 'Apagar…'])
+    for (const b of within(lista).getAllByRole('button', { name: nome }))
+      expect((b as HTMLButtonElement).disabled).toBe(true)
 })

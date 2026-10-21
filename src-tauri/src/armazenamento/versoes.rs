@@ -26,6 +26,11 @@ pub const PREFIXO_LEGADO: &str = "frota_legado_";
 const PREFIXOS_POSTOS_DE_LADO: [&str; 3] =
     [PREFIXO_DANIFICADO, PREFIXO_POSTO_DE_PARTE, PREFIXO_LEGADO];
 
+/// `versoes\nomes.json`: { ficheiro: nome dado pelo utilizador }. Uma cópia com
+/// nome é guardada de propósito: nunca é podada nem conta para as 30 / 5.
+const FICHEIRO_NOMES: &str = "nomes.json";
+const MAX_ROTULO: usize = 60;
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Versao {
@@ -38,6 +43,39 @@ pub struct Versao {
     /// (o restauro verifica-as). Ficheiros postos de lado: só se passarem a
     /// verificação de integridade e de esquema.
     pub restauravel: bool,
+    /// Nome dado pelo utilizador (a cópia deixa de ser apagada automaticamente).
+    pub rotulo: Option<String>,
+}
+
+type Rotulos = std::collections::BTreeMap<String, String>;
+
+/// Lê `nomes.json`; ausente ou ilegível = sem nomes (nunca impede listar/podar).
+fn ler_rotulos(dir: &Path) -> Rotulos {
+    std::fs::read(dir.join(FICHEIRO_NOMES))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Grava `nomes.json` (tmp + rename), só com as entradas de ficheiros que
+/// existem; sem entradas apaga-o.
+fn escrever_rotulos(dir: &Path, mut r: Rotulos) -> Res<()> {
+    r.retain(|f, _| dir.join(f).is_file());
+    let destino = dir.join(FICHEIRO_NOMES);
+    if r.is_empty() {
+        return match std::fs::remove_file(&destino) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        };
+    }
+    let tmp = tmp_de(&destino);
+    let texto = serde_json::to_vec_pretty(&r).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let res = std::fs::write(&tmp, texto).and_then(|_| std::fs::rename(&tmp, &destino));
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res?;
+    Ok(())
 }
 
 fn existe(p: &Path) -> Res<bool> {
@@ -162,9 +200,12 @@ fn chave(nome: &str) -> (String, String, u32) {
 }
 
 /// Mantém no máximo 30 ficheiros datados (diários + manuais), apagando os mais
-/// antigos pelo nome (a data está no nome). Nunca apaga os nomes em `proteger`.
+/// antigos pelo nome (a data está no nome). Nunca apaga os nomes em `proteger`
+/// nem as cópias com nome (que também não contam para as 30).
 fn podar_datadas(dir: &Path, proteger: &[&str]) -> Res<()> {
+    let rotulos = ler_rotulos(dir);
     let mut v = ficheiros(dir, eh_datada)?;
+    v.retain(|(nome, _, _)| !rotulos.contains_key(nome));
     v.sort_by(|a, b| chave(&a.0).cmp(&chave(&b.0)));
     let mut excesso = v.len().saturating_sub(MAX_DIARIAS);
     for (nome, p, _) in v {
@@ -180,9 +221,12 @@ fn podar_datadas(dir: &Path, proteger: &[&str]) -> Res<()> {
     Ok(())
 }
 
-/// Mantém no máximo 5 cópias "antes da versão", pela data de modificação.
+/// Mantém no máximo 5 cópias "antes da versão", pela data de modificação
+/// (as cópias com nome ficam sempre e não contam).
 fn podar_antes(dir: &Path, proteger: &[&str]) -> Res<()> {
+    let rotulos = ler_rotulos(dir);
     let mut v = ficheiros(dir, eh_antes)?;
+    v.retain(|(nome, _, _)| !rotulos.contains_key(nome));
     v.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
     let mut excesso = v.len().saturating_sub(MAX_ANTES_DA);
     for (nome, p, _) in v {
@@ -328,6 +372,7 @@ fn data_de(nome: &str, mtime: SystemTime) -> String {
 
 pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
     let dir = pasta(c)?;
+    let rotulos = ler_rotulos(&dir);
     let mut v: Vec<Versao> = Vec::new();
     for (nome, p, mtime) in ficheiros(&dir, |n| eh_datada(n) || eh_antes(n) || eh_posto_de_lado(n))?
     {
@@ -336,6 +381,7 @@ pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
         v.push(Versao {
             data: data_de(&nome, mtime),
             tamanho: std::fs::metadata(&p)?.len(),
+            rotulo: rotulos.get(&nome).cloned(),
             nome,
             carros,
             lancamentos,
@@ -344,6 +390,56 @@ pub fn listar(c: &Caminhos) -> Res<Vec<Versao>> {
     }
     v.sort_by(|a, b| b.data.cmp(&a.data).then_with(|| b.nome.cmp(&a.nome)));
     Ok(v)
+}
+
+/// Nome de ficheiro de uma versão que existe em `dir` (nunca sai da pasta).
+fn origem_valida(dir: &Path, nome: &str) -> Res<PathBuf> {
+    if nome.is_empty()
+        || nome.contains(['/', '\\'])
+        || nome.contains("..")
+        || !(parse_datada(nome).is_some() || eh_antes(nome) || eh_posto_de_lado(nome))
+    {
+        return Err(versao_invalida());
+    }
+    let p = dir.join(nome);
+    if !existe(&p)? {
+        return Err(versao_invalida());
+    }
+    Ok(p)
+}
+
+/// Dá (ou tira, com `rotulo` vazio) um nome a uma versão. Com nome, a versão
+/// deixa de ser apagada automaticamente.
+pub fn nomear(c: &Caminhos, nome: &str, rotulo: &str) -> Res<()> {
+    let dir = pasta(c)?;
+    origem_valida(&dir, nome)?;
+    let rotulo = rotulo.split_whitespace().collect::<Vec<_>>().join(" ");
+    if rotulo.chars().count() > MAX_ROTULO {
+        return Err(Erro {
+            campo: Some("rotulo".into()),
+            codigo: "rotulo_longo".into(),
+            mensagem: format!("O nome pode ter no máximo {MAX_ROTULO} caracteres."),
+        });
+    }
+    let mut r = ler_rotulos(&dir);
+    if rotulo.is_empty() {
+        r.remove(nome);
+    } else {
+        r.insert(nome.to_string(), rotulo);
+    }
+    escrever_rotulos(&dir, r)
+}
+
+/// Apaga uma versão (e o seu nome). Não se desfaz.
+pub fn apagar(c: &Caminhos, nome: &str) -> Res<()> {
+    let dir = pasta(c)?;
+    let p = origem_valida(&dir, nome)?;
+    std::fs::remove_file(p)?;
+    let mut r = ler_rotulos(&dir);
+    if r.remove(nome).is_some() {
+        escrever_rotulos(&dir, r)?;
+    }
+    Ok(())
 }
 
 fn versao_invalida() -> Erro {
@@ -410,18 +506,8 @@ pub fn restaurar(
     copia_seguranca: bool,
     agora: NaiveDateTime,
 ) -> Res<Option<String>> {
-    if nome.is_empty()
-        || nome.contains(['/', '\\'])
-        || nome.contains("..")
-        || !(parse_datada(nome).is_some() || eh_antes(nome) || eh_posto_de_lado(nome))
-    {
-        return Err(versao_invalida());
-    }
     let dir = pasta(c)?;
-    let origem = dir.join(nome);
-    if !existe(&origem)? {
-        return Err(versao_invalida());
-    }
+    let origem = origem_valida(&dir, nome)?;
     // 1. verificar antes de tocar em qualquer coisa (também os postos de lado:
     // um `frota_posto_de_parte_*` pode ter dados bons)
     let origem_conn = verificar(&origem)?;
@@ -951,6 +1037,105 @@ mod testes {
         let v = l.iter().find(|v| v.nome == nome).unwrap();
         assert!(v.restauravel);
         assert_eq!((v.carros, v.data.as_str()), (1, "2026-01-01 09:00"));
+    }
+
+    #[test]
+    fn nomear_mostra_o_nome_e_tirar_o_apaga() {
+        let (_t, c, _conn) = cenario();
+        copia_diaria(&c, dia(0)).unwrap();
+        nomear(&c, "frota_2026-01-01.db", "  Antes da   limpeza ").unwrap();
+        let l = listar(&c).unwrap();
+        assert_eq!(l[0].rotulo.as_deref(), Some("Antes da limpeza"));
+        nomear(&c, "frota_2026-01-01.db", "   ").unwrap();
+        assert_eq!(listar(&c).unwrap()[0].rotulo, None);
+        assert!(!c.dados.join("versoes").join(FICHEIRO_NOMES).exists());
+    }
+
+    #[test]
+    fn nomear_recusa_nomes_longos_e_versoes_inexistentes() {
+        let (_t, c, _conn) = cenario();
+        copia_diaria(&c, dia(0)).unwrap();
+        let e = nomear(&c, "frota_2026-01-01.db", &"a".repeat(61)).unwrap_err();
+        assert_eq!(
+            (e.codigo.as_str(), e.campo.as_deref()),
+            ("rotulo_longo", Some("rotulo"))
+        );
+        nomear(&c, "frota_2026-01-01.db", &"á".repeat(60)).unwrap();
+        for nome in ["frota_2026-01-02.db", "..\\frota.db", "nomes.json", ""] {
+            assert_eq!(
+                nomear(&c, nome, "x").unwrap_err().codigo,
+                "versao_invalida",
+                "{nome}"
+            );
+        }
+    }
+
+    #[test]
+    fn copias_com_nome_nunca_sao_podadas_nem_contam() {
+        let (_t, c, _conn) = cenario();
+        for i in 0..30 {
+            copia_diaria(&c, dia(i)).unwrap();
+        }
+        nomear(&c, "frota_2026-01-01.db", "Guardar").unwrap();
+        copia_diaria(&c, dia(30)).unwrap();
+        copia_diaria(&c, dia(31)).unwrap();
+        let n = nomes(&c, "frota_2");
+        // 30 sem nome + a com nome
+        assert_eq!(n.len(), 31);
+        assert!(n.contains(&"frota_2026-01-01.db".to_string()));
+        assert!(!n.contains(&"frota_2026-01-02.db".to_string()));
+        // o mesmo nas "antes da versão"
+        for i in 1..=5u64 {
+            copia_antes_de(&c, &format!("1.0.{i}")).unwrap();
+        }
+        nomear(&c, "frota_antes-da-v1.0.1.db", "Primeira").unwrap();
+        copia_antes_de(&c, "1.0.6").unwrap();
+        copia_antes_de(&c, "1.0.7").unwrap();
+        let a = nomes(&c, "frota_antes-da-");
+        assert_eq!(a.len(), 6);
+        assert!(a.contains(&"frota_antes-da-v1.0.1.db".to_string()));
+    }
+
+    #[test]
+    fn apagar_remove_o_ficheiro_e_o_nome() {
+        let (_t, c, _conn) = cenario();
+        copia_diaria(&c, dia(0)).unwrap();
+        copia_diaria(&c, dia(1)).unwrap();
+        nomear(&c, "frota_2026-01-01.db", "A").unwrap();
+        nomear(&c, "frota_2026-01-02.db", "B").unwrap();
+        apagar(&c, "frota_2026-01-01.db").unwrap();
+        let l = listar(&c).unwrap();
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].rotulo.as_deref(), Some("B"));
+        assert_eq!(ler_rotulos(&c.dados.join("versoes")).len(), 1);
+        // nomes perigosos ou inexistentes: recusados sem tocar em nada
+        for nome in [
+            "frota_2026-01-01.db",
+            "..\\frota.db",
+            "../dados/frota.db",
+            "nomes.json",
+            "",
+        ] {
+            assert_eq!(
+                apagar(&c, nome).unwrap_err().codigo,
+                "versao_invalida",
+                "{nome}"
+            );
+        }
+        assert!(c.banco.exists());
+        assert_eq!(listar(&c).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn nomes_json_ilegivel_nao_impede_listar_nem_podar() {
+        let (_t, c, _conn) = cenario();
+        copia_diaria(&c, dia(0)).unwrap();
+        std::fs::write(c.dados.join("versoes").join(FICHEIRO_NOMES), b"{lixo").unwrap();
+        let l = listar(&c).unwrap();
+        assert_eq!((l.len(), l[0].rotulo.as_deref()), (1, None));
+        // dar um nome reescreve o ficheiro corretamente
+        nomear(&c, "frota_2026-01-01.db", "Ok").unwrap();
+        assert_eq!(listar(&c).unwrap()[0].rotulo.as_deref(), Some("Ok"));
     }
 
     /// v0.1.1: se o journal não se consegue mover, o banco volta ao lugar.

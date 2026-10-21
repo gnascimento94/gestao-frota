@@ -51,6 +51,12 @@ export const listarVersoes = () => invoke<Versao[]>('listar_versoes')
 
 export const restaurarVersao = (nome: string) => invoke<void>('restaurar_versao', { nome })
 
+/** `rotulo` vazio tira o nome. */
+export const nomearVersao = (nome: string, rotulo: string) =>
+  invoke<void>('nomear_versao', { nome, rotulo })
+
+export const apagarVersao = (nome: string) => invoke<void>('apagar_versao', { nome })
+
 // ---------- atualização ----------
 
 /** Versão mais recente no GitHub, ou `null` (sem internet, em consulta, em desenvolvimento…). */

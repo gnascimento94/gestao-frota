@@ -171,17 +171,27 @@ pub(crate) fn para_utc(agora: NaiveDateTime) -> DateTime<Utc> {
         .unwrap_or_else(|| agora.and_utc())
 }
 
-/// A pasta parece estar dentro do Google Drive para computador?
+/// A pasta parece estar dentro do Google Drive para computador? Pelo nome da
+/// pasta do Drive (pt-PT, pt-BR, en, es) ou, em qualquer idioma, pela pasta
+/// `.shortcut-targets-by-id` que o Drive cria na raiz da unidade virtual.
 pub fn no_google_drive(pasta: &Path) -> bool {
     let s = format!("{}\\", pasta.to_string_lossy().replace('/', "\\")).to_lowercase();
-    [
+    let pelo_nome = [
         r"\meu disco\",
         r"\o meu disco\",
+        r"\meu drive\",
         r"\my drive\",
+        r"\mi unidad\",
         r"\google drive\",
     ]
     .iter()
-    .any(|p| s.contains(p))
+    .any(|p| s.contains(p));
+    pelo_nome || pasta.ancestors().last().is_some_and(unidade_do_drive)
+}
+
+/// `unidade` (p.ex. `G:\`) é a unidade virtual do Google Drive para computador?
+fn unidade_do_drive(unidade: &Path) -> bool {
+    unidade.join(".shortcut-targets-by-id").is_dir()
 }
 
 /// `v2`, tamanho e SHA-256 (hex) do ficheiro inteiro; `None` se não existir ou
@@ -943,6 +953,25 @@ impl Estado {
         versoes::listar(&self.caminhos)
     }
 
+    /// Dá/tira o nome de uma versão. Recusado em consulta (a pasta é de outro PC).
+    /// Segura `conn` para não se cruzar com cópias, restauros e a poda.
+    pub fn nomear_versao(&self, nome: &str, rotulo: &str) -> Res<()> {
+        let _g = trava(&self.conn);
+        if self.so_consulta.load(Ordering::SeqCst) {
+            return Err(erro_so_consulta());
+        }
+        versoes::nomear(&self.caminhos, nome, rotulo)
+    }
+
+    /// Apaga uma versão. Recusado em consulta.
+    pub fn apagar_versao(&self, nome: &str) -> Res<()> {
+        let _g = trava(&self.conn);
+        if self.so_consulta.load(Ordering::SeqCst) {
+            return Err(erro_so_consulta());
+        }
+        versoes::apagar(&self.caminhos, nome)
+    }
+
     /// Repõe uma versão. Em modo normal carrega-a na ligação aberta (com cópia de
     /// segurança do estado atual).
     ///
@@ -1612,6 +1641,12 @@ mod testes {
         assert!(no_google_drive(Path::new(r"G:\My Drive\Frota")));
         assert!(no_google_drive(Path::new(r"C:\Users\x\Google Drive\Frota")));
         assert!(no_google_drive(Path::new(r"g:\meu disco\frota")));
+        assert!(no_google_drive(Path::new(r"G:\Meu Drive\Frota Teste")));
+        // qualquer idioma: pela pasta que o Drive cria na raiz da unidade
+        let t = tempfile::tempdir().unwrap();
+        assert!(!unidade_do_drive(t.path()));
+        std::fs::create_dir(t.path().join(".shortcut-targets-by-id")).unwrap();
+        assert!(unidade_do_drive(t.path()));
         assert!(!no_google_drive(Path::new(r"C:\Frota")));
     }
 

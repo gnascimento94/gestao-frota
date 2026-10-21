@@ -72,6 +72,17 @@ pub fn restaurar_versao(e: E<'_>, nome: String) -> Res<()> {
     e.restaurar_versao(&nome, agora())
 }
 
+/// `rotulo` vazio tira o nome.
+#[tauri::command(async)]
+pub fn nomear_versao(e: E<'_>, nome: String, rotulo: String) -> Res<()> {
+    e.nomear_versao(&nome, &rotulo)
+}
+
+#[tauri::command(async)]
+pub fn apagar_versao(e: E<'_>, nome: String) -> Res<()> {
+    e.apagar_versao(&nome)
+}
+
 // ---------- atualização ----------
 
 #[derive(Debug, Clone, Serialize)]
