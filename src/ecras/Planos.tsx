@@ -1,4 +1,4 @@
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useMemo, useState, type FormEvent } from 'react'
 import {
   carrosListar,
   limiaresGuardar,
@@ -18,11 +18,13 @@ import { Campo, CampoSelecao } from '../ui/Campo'
 import { Cartao } from '../ui/Cartao'
 import { CabecalhoFolha, Folha } from '../ui/Folha'
 import { ItemLista, Lista } from '../ui/Lista'
-import { useDesfazer } from '../ui/useDesfazer'
-import { errosDe, paraErroApi, useCarregar, type ErrosCampos } from './comum'
+import { useDesfazer, useEscondidas } from '../ui/useDesfazer'
+import { errosDe, useCarregar, type ErrosCampos } from './comum'
 import { SUGESTAO, textoAlvo, textoIntervalo, textoPlano } from './textosPlanos'
 
 const MSG_MESES = 'Indique os meses como número inteiro.'
+
+const chavePlano = (id: number) => `plano:${id}`
 
 interface Dados {
   planos: Plano[]
@@ -45,37 +47,29 @@ export function Planos({ ano, versao = 0, soConsulta = false }: { ano: number; v
   }, [ano])
   const { dados, erro, recarregar } = useCarregar(buscar, versao)
   const { agendar } = useDesfazer()
-  const [aApagar, setAApagar] = useState<ReadonlySet<number>>(new Set())
-  const [erroGeral, setErroGeral] = useState<string | null>(null)
+  // Os apagamentos pendentes vivem no provider do "Desfazer": navegar e voltar não os faz
+  // reaparecer, e um plano apagado só deixa de ser escondido quando a lista já não o tem.
+  const presentes = useMemo(
+    () => (dados ? new Set(dados.planos.map((p) => chavePlano(p.id))) : null),
+    [dados],
+  )
+  const escondidas = useEscondidas(presentes)
   const [folha, setFolha] = useState<EstadoFolha>({ aberta: false, origem: null, plano: null, inicial: null })
   const fechar = () => setFolha((f) => ({ ...f, aberta: false }))
 
   const matriculas = new Map((dados?.carros ?? []).map((c) => [c.id, c.matricula]))
-  const visiveis = (dados?.planos ?? []).filter((p) => !aApagar.has(p.id))
-
-  const mostrar = (id: number) =>
-    setAApagar((s) => {
-      const n = new Set(s)
-      n.delete(id)
-      return n
-    })
+  const visiveis = (dados?.planos ?? []).filter((p) => !escondidas.has(chavePlano(p.id)))
 
   function apagar(p: Plano) {
-    setErroGeral(null)
-    setAApagar((s) => new Set(s).add(p.id))
+    // Falha: o provider mostra a mensagem do núcleo e a App recarrega.
     agendar(
       `Apagado: ${p.tipoNome}`,
       async () => {
-        try {
-          await planoApagar(p.id)
-        } catch (e) {
-          setErroGeral(paraErroApi(e).mensagem)
-        } finally {
-          mostrar(p.id)
-          recarregar()
-        }
+        await planoApagar(p.id)
+        recarregar()
       },
-      () => mostrar(p.id),
+      undefined,
+      chavePlano(p.id),
     )
   }
 
@@ -114,11 +108,7 @@ export function Planos({ ano, versao = 0, soConsulta = false }: { ano: number; v
           {erro}
         </p>
       )}
-      {erroGeral && (
-        <p className="form-erro" role="alert">
-          {erroGeral}
-        </p>
-      )}
+
 
       <div className="planos-grelha">
         <Cartao titulo="Planos" semMargem contagem={dados ? visiveis.length : undefined}>

@@ -14,6 +14,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { paraErroApi } from '../ecras/comum'
 import {
   ContextoDesfazer,
   ESPERA_DESFAZER_MS,
@@ -25,6 +26,7 @@ interface Pendente {
   rotulo: string
   acao: () => Promise<void>
   aoDesfazer?: () => void
+  chave?: string
   temporizador: ReturnType<typeof setTimeout>
 }
 
@@ -41,11 +43,14 @@ const aoFecharJanelaTauri: AoFecharJanela = async (executar) => {
   return getCurrentWindow().onCloseRequested(() => executar())
 }
 
-async function correr(acao: () => Promise<void>) {
+/** Corre a ação; devolve a mensagem do erro, ou `null` se correu bem. */
+async function correr(acao: () => Promise<void>): Promise<string | null> {
   try {
     await acao()
+    return null
   } catch (e) {
     console.error('Falha ao executar ação pendente', e)
+    return paraErroApi(e).mensagem
   }
 }
 
@@ -59,16 +64,36 @@ function resumir(pendentes: Map<number, Pendente>): ResumoPendentes | null {
 export function DesfazerProvider({
   children,
   aoFecharJanela = aoFecharJanelaTauri,
+  aoFalhar,
 }: {
   children: ReactNode
   aoFecharJanela?: AoFecharJanela
+  /** Um apagamento falhou depois dos 8 s: a App recarrega os dados (o item volta a aparecer). */
+  aoFalhar?: () => void
 }) {
   const pendentes = useRef(new Map<number, Pendente>())
-  const emCurso = useRef(new Set<Promise<void>>())
+  const emCurso = useRef(new Set<Promise<unknown>>())
   const proximoId = useRef(1)
   const [resumo, setResumo] = useState<ResumoPendentes | null>(null)
+  const [escondidas, setEscondidas] = useState<ReadonlySet<string>>(new Set())
+  /** Chaves já apagadas, escondidas até uma lista sem elas o confirmar. */
+  const apagadas = useRef(new Set<string>())
+  const [falha, setFalha] = useState<string | null>(null)
+  const aoFalharRef = useRef(aoFalhar)
+  useLayoutEffect(() => {
+    aoFalharRef.current = aoFalhar
+  })
 
   const atualizar = useCallback(() => setResumo(resumir(pendentes.current)), [])
+  const mostrar = useCallback((chaves: (string | undefined)[]) => {
+    const tirar = chaves.filter((c): c is string => c !== undefined)
+    if (tirar.length === 0) return
+    setEscondidas((s) => {
+      const n = new Set(s)
+      for (const c of tirar) n.delete(c)
+      return n
+    })
+  }, [])
 
   const executar = useCallback(
     (id: number) => {
@@ -77,12 +102,30 @@ export function DesfazerProvider({
       clearTimeout(p.temporizador)
       pendentes.current.delete(id)
       atualizar()
-      const promessa = correr(p.acao)
+      const promessa = correr(p.acao).then((erro) => {
+        if (erro === null) {
+          if (p.chave) apagadas.current.add(p.chave)
+          return
+        }
+        mostrar([p.chave])
+        setFalha(`${p.rotulo} — não foi possível concluir: ${erro}`)
+        aoFalharRef.current?.()
+      })
       emCurso.current.add(promessa)
       void promessa.finally(() => emCurso.current.delete(promessa))
     },
-    [atualizar],
+    [atualizar, mostrar],
   )
+
+  const confirmarApagadas = useCallback(
+    (presentes: ReadonlySet<string>) => {
+      const sairam = [...apagadas.current].filter((c) => !presentes.has(c))
+      for (const c of sairam) apagadas.current.delete(c)
+      mostrar(sairam)
+    },
+    [mostrar],
+  )
+  const fecharFalha = useCallback(() => setFalha(null), [])
 
   /** Corre as pendentes e espera por todas as que estão a correr. */
   const executarTodas = useCallback(async () => {
@@ -91,10 +134,12 @@ export function DesfazerProvider({
   }, [executar])
 
   const agendar = useCallback(
-    (rotulo: string, acao: () => Promise<void>, aoDesfazer?: () => void) => {
+    (rotulo: string, acao: () => Promise<void>, aoDesfazer?: () => void, chave?: string) => {
       const id = proximoId.current++
       const temporizador = setTimeout(() => executar(id), ESPERA_DESFAZER_MS)
-      pendentes.current.set(id, { rotulo, acao, aoDesfazer, temporizador })
+      pendentes.current.set(id, { rotulo, acao, aoDesfazer, chave, temporizador })
+      if (chave) setEscondidas((s) => new Set(s).add(chave))
+      setFalha(null)
       atualizar()
     },
     [executar, atualizar],
@@ -105,8 +150,9 @@ export function DesfazerProvider({
     for (const p of desfeitas) clearTimeout(p.temporizador)
     pendentes.current.clear()
     atualizar()
+    mostrar(desfeitas.map((p) => p.chave))
     for (const p of desfeitas) p.aoDesfazer?.()
-  }, [atualizar])
+  }, [atualizar, mostrar])
 
   // Ref para os handlers de saída verem sempre a versão atual.
   const executarTodasRef = useRef(executarTodas)
@@ -147,7 +193,10 @@ export function DesfazerProvider({
   // Se o provider desaparecer, o apagamento pedido não se perde.
   useEffect(() => () => void executarTodasRef.current(), [])
 
-  const valor = useMemo(() => ({ agendar, resumo, desfazerTodas }), [agendar, resumo, desfazerTodas])
+  const valor = useMemo(
+    () => ({ agendar, resumo, desfazerTodas, escondidas, confirmarApagadas, falha, fecharFalha }),
+    [agendar, resumo, desfazerTodas, escondidas, confirmarApagadas, falha, fecharFalha],
+  )
   return <ContextoDesfazer.Provider value={valor}>{children}</ContextoDesfazer.Provider>
 }
 
@@ -163,7 +212,7 @@ export function Desfazer() {
   const c = useContext(ContextoDesfazer)
   if (!c) throw new Error('<Desfazer/> tem de estar dentro de <DesfazerProvider>')
   const reduzir = useReducedMotion()
-  const { resumo, desfazerTodas } = c
+  const { resumo, desfazerTodas, falha, fecharFalha } = c
   const visivel = resumo !== null
 
   useEffect(() => {
@@ -179,13 +228,23 @@ export function Desfazer() {
   }, [visivel, desfazerTodas])
 
   return (
-    <div className="desfazer-zona" role="status" aria-live="polite">
-      <AnimatePresence>
-        {resumo && (
-          <Toast key="desfazer" texto={resumo.texto} reduzir={!!reduzir} onDesfazer={desfazerTodas} />
-        )}
-      </AnimatePresence>
-    </div>
+    <>
+      {falha && (
+        <div className="desfazer desfazer-falha" role="alert">
+          <span>{falha}</span>
+          <button type="button" className="desfazer-botao" onClick={fecharFalha}>
+            Fechar
+          </button>
+        </div>
+      )}
+      <div className="desfazer-zona" role="status" aria-live="polite">
+        <AnimatePresence>
+          {resumo && (
+            <Toast key="desfazer" texto={resumo.texto} reduzir={!!reduzir} onDesfazer={desfazerTodas} />
+          )}
+        </AnimatePresence>
+      </div>
+    </>
   )
 }
 

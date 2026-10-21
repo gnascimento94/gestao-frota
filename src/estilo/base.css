@@ -832,6 +832,13 @@ time {
   opacity: 0.5;
 }
 
+/* Apagamento que falhou depois dos 8 s (mensagem do núcleo). */
+.desfazer-falha {
+  pointer-events: auto;
+  max-width: 420px;
+  box-shadow: var(--sombra-m), inset 3px 0 0 var(--vermelho);
+}
+
 .desfazer-botao {
   appearance: none;
   border: 0;
@@ -865,6 +872,7 @@ time {
 
 .aviso-texto {
   flex: 1;
+  white-space: pre-line;
 }
 
 .aviso-fechar {

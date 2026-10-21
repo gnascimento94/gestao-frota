@@ -1,6 +1,9 @@
 // Banner sobre a gravação: erro ao guardar ou programa aberto só para consulta.
 // O estado vem de useEstadoArmazenamento (./useEstadoArmazenamento), que consulta a cada 5 s.
 
+import { useCallback, useState } from 'react'
+import { dispensarAviso } from '../api/comandos'
+import { paraErroApi } from '../ecras/comum'
 import type { EstadoGravacao } from './useEstadoArmazenamento'
 
 /** Banner de aviso sobre a gravação. Não mostra nada quando está tudo bem. */
@@ -49,14 +52,26 @@ function Icone() {
 
 /**
  * Aviso do arranque (p.ex. alterações deste PC guardadas em Backup por conflito com outro PC).
- * Fica visível até o utilizador o fechar; `onFechar` chama `dispensarAviso()`.
+ * Fica visível até o utilizador o fechar; `onFechar` chama `dispensarAviso()`. `erro`: o fecho
+ * falhou (o aviso volta a ficar visível com a explicação).
  */
-export function AvisoArranque({ texto, onFechar }: { texto: string | null; onFechar(): void }) {
+export function AvisoArranque({
+  texto,
+  erro,
+  onFechar,
+}: {
+  texto: string | null
+  erro?: string | null
+  onFechar(): void
+}) {
   if (!texto) return null
   return (
     <div className="aviso aviso-alerta" role="alert">
       <Icone />
-      <div className="aviso-texto">{texto}</div>
+      <div className="aviso-texto">
+        {texto}
+        {erro && <span className="aviso-detalhe">{erro}</span>}
+      </div>
       <button type="button" className="aviso-fechar" aria-label="Fechar aviso" onClick={onFechar}>
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4 4l8 8M12 4l-8 8" />
@@ -64,4 +79,22 @@ export function AvisoArranque({ texto, onFechar }: { texto: string | null; onFec
       </button>
     </div>
   )
+}
+
+/**
+ * `AvisoArranque` ligado ao núcleo: esconde-se logo ao fechar (sem esperar pela próxima
+ * consulta do estado) e chama `dispensarAviso()`; se isso falhar, volta a aparecer com o erro.
+ */
+export function AvisoArranqueDispensavel({ texto }: { texto: string | null }) {
+  const [fechado, setFechado] = useState<string | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const fechar = useCallback(() => {
+    setFechado(texto)
+    setErro(null)
+    dispensarAviso().catch((e: unknown) => {
+      setFechado(null)
+      setErro(`Não foi possível fechar o aviso: ${paraErroApi(e).mensagem}`)
+    })
+  }, [texto])
+  return <AvisoArranque texto={texto !== fechado ? texto : null} erro={erro} onFechar={fechar} />
 }

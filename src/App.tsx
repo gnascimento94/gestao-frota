@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { dispensarAviso } from './api/comandos'
-import { Aviso, AvisoArranque } from './ui/Aviso'
+import { Aviso, AvisoArranqueDispensavel } from './ui/Aviso'
 import { Barra } from './ui/Barra'
 import { Desfazer, DesfazerProvider } from './ui/Desfazer'
 import { useEstadoArmazenamento } from './ui/useEstadoArmazenamento'
@@ -38,9 +37,7 @@ export default function App() {
   // Só chega aqui depois de um arranque com os dados abertos (ver `Arranque`).
   return (
     <VerificarAtualizacao>
-      <DesfazerProvider>
-        <Concha />
-      </DesfazerProvider>
+      <Concha />
     </VerificarAtualizacao>
   )
 }
@@ -66,13 +63,6 @@ function Concha() {
   const [versao, setVersao] = useState(0)
   const recarregar = useCallback(() => setVersao((v) => v + 1), [])
   const [zonaToasts, setZonaToasts] = useState<HTMLDivElement | null>(null)
-  // Aviso do arranque fechado nesta sessão (escondido já, sem esperar pela próxima consulta).
-  const [avisoFechado, setAvisoFechado] = useState<string | null>(null)
-  const avisoArranque = gravacao.estado?.avisoArranque ?? null
-  const fecharAviso = useCallback(() => {
-    setAvisoFechado(avisoArranque)
-    dispensarAviso().catch((e: unknown) => console.error('Não foi possível fechar o aviso', e))
-  }, [avisoArranque])
 
   // Atalhos globais: Ctrl+N (lançar), Ctrl+K (pesquisar). Esc é tratado pela folha.
   useEffect(() => {
@@ -107,98 +97,101 @@ function Concha() {
   const [ano] = useState(() => new Date().getFullYear())
 
   return (
-    <div className="app">
-      <Barra
-        ecra={ecra}
-        onNavegar={navegar}
-        onLancar={abrirLancar}
-        refLancar={refLancar}
-        gravacao={gravacao}
-      />
+    // O provider fica aqui para um apagamento que falhe depois dos 8 s recarregar os ecrãs.
+    <DesfazerProvider aoFalhar={recarregar}>
+      <div className="app">
+        <Barra
+          ecra={ecra}
+          onNavegar={navegar}
+          onLancar={abrirLancar}
+          refLancar={refLancar}
+          gravacao={gravacao}
+        />
 
-      <main className="principal" ref={refPrincipal}>
-        <header className="topo">
-          <div className="topo-titulos">
-            <h1 className="topo-titulo">{titulo}</h1>
+        <main className="principal" ref={refPrincipal}>
+          <header className="topo">
+            <div className="topo-titulos">
+              <h1 className="topo-titulo">{titulo}</h1>
+            </div>
+            <label className="busca">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M20 20l-3.5-3.5" />
+              </svg>
+              <input
+                ref={refPesquisa}
+                type="search"
+                placeholder="Procurar matrícula"
+                aria-label="Procurar matrícula"
+                aria-keyshortcuts="Control+K"
+                value={pesquisa}
+                onChange={(e) => {
+                  setPesquisa(e.target.value)
+                  if (e.target.value && ecra.nome !== 'carros') navegar({ nome: 'carros' })
+                }}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <kbd aria-hidden="true">Ctrl K</kbd>
+            </label>
+          </header>
+
+          <AvisoArranqueDispensavel texto={gravacao.estado?.avisoArranque ?? null} />
+          <Aviso {...gravacao} />
+
+          {/* `versao` muda após cada lançamento: o ecrã visível volta a pedir os dados
+              (sem remontar: separador, filtros, scroll e foco mantêm-se). */}
+          <div className="conteudo">
+            {ecra.nome === 'carros' && (
+              <Carros
+                ano={ano}
+                versao={versao}
+                pesquisa={pesquisa}
+                onAbrir={(id) => navegar({ nome: 'carro', id })}
+              />
+            )}
+            {ecra.nome === 'carro' && (
+              <FichaCarro
+                key={ecra.id}
+                id={ecra.id}
+                ano={ano}
+                versao={versao}
+                onNavegar={navegar}
+                onLancar={abrirLancar}
+              />
+            )}
+            {ecra.nome === 'motoristas' && (
+              <Motoristas key={ecra.id ?? 'lista'} ano={ano} versao={versao} inicial={ecra.id} />
+            )}
+            {ecra.nome === 'inicio' && (
+              <InicioOuBoasVindas ano={ano} versao={versao} onNavegar={navegar}>
+                <Inicio ano={ano} versao={versao} onNavegar={navegar} />
+              </InicioOuBoasVindas>
+            )}
+            {ecra.nome === 'relatorios' && <Relatorios versao={versao} onNavegar={navegar} />}
+            {ecra.nome === 'planos' && (
+              <Planos ano={ano} versao={versao} soConsulta={gravacao.estado?.soConsulta ?? false} />
+            )}
+            {ecra.nome === 'backup' && (
+              <Backup estado={gravacao.estado} versao={versao} onRestaurado={recarregar} />
+            )}
           </div>
-          <label className="busca">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" />
-              <path d="M20 20l-3.5-3.5" />
-            </svg>
-            <input
-              ref={refPesquisa}
-              type="search"
-              placeholder="Procurar matrícula"
-              aria-label="Procurar matrícula"
-              aria-keyshortcuts="Control+K"
-              value={pesquisa}
-              onChange={(e) => {
-                setPesquisa(e.target.value)
-                if (e.target.value && ecra.nome !== 'carros') navegar({ nome: 'carros' })
-              }}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <kbd aria-hidden="true">Ctrl K</kbd>
-          </label>
-        </header>
+        </main>
 
-        <AvisoArranque texto={avisoArranque !== avisoFechado ? avisoArranque : null} onFechar={fecharAviso} />
-        <Aviso {...gravacao} />
+        <Lancar
+          aberta={lancar.aberta}
+          origem={lancar.origem}
+          carroId={lancar.carroId}
+          onFechar={fecharLancar}
+          onLancado={recarregar}
+          zonaToasts={zonaToasts}
+        />
 
-        {/* `versao` muda após cada lançamento: o ecrã visível volta a pedir os dados
-            (sem remontar: separador, filtros, scroll e foco mantêm-se). */}
-        <div className="conteudo">
-          {ecra.nome === 'carros' && (
-            <Carros
-              ano={ano}
-              versao={versao}
-              pesquisa={pesquisa}
-              onAbrir={(id) => navegar({ nome: 'carro', id })}
-            />
-          )}
-          {ecra.nome === 'carro' && (
-            <FichaCarro
-              key={ecra.id}
-              id={ecra.id}
-              ano={ano}
-              versao={versao}
-              onNavegar={navegar}
-              onLancar={abrirLancar}
-            />
-          )}
-          {ecra.nome === 'motoristas' && (
-            <Motoristas key={ecra.id ?? 'lista'} ano={ano} versao={versao} inicial={ecra.id} />
-          )}
-          {ecra.nome === 'inicio' && (
-            <InicioOuBoasVindas ano={ano} versao={versao} onNavegar={navegar}>
-              <Inicio ano={ano} versao={versao} onNavegar={navegar} />
-            </InicioOuBoasVindas>
-          )}
-          {ecra.nome === 'relatorios' && <Relatorios versao={versao} onNavegar={navegar} />}
-          {ecra.nome === 'planos' && (
-            <Planos ano={ano} versao={versao} soConsulta={gravacao.estado?.soConsulta ?? false} />
-          )}
-          {ecra.nome === 'backup' && (
-            <Backup estado={gravacao.estado} versao={versao} onRestaurado={recarregar} />
-          )}
+        {/* Toasts empilhados: "Lançado ✓" (portal da folha Lançar) e "Desfazer". */}
+        <div className="zona-toasts" ref={setZonaToasts}>
+          <Desfazer />
         </div>
-      </main>
-
-      <Lancar
-        aberta={lancar.aberta}
-        origem={lancar.origem}
-        carroId={lancar.carroId}
-        onFechar={fecharLancar}
-        onLancado={recarregar}
-        zonaToasts={zonaToasts}
-      />
-
-      {/* Toasts empilhados: "Lançado ✓" (portal da folha Lançar) e "Desfazer". */}
-      <div className="zona-toasts" ref={setZonaToasts}>
-        <Desfazer />
       </div>
-    </div>
+    </DesfazerProvider>
   )
 }

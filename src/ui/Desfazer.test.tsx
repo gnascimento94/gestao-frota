@@ -210,3 +210,23 @@ test('Ctrl+Z num campo de texto não desfaz o apagamento', async () => {
   })
   expect(acao).toHaveBeenCalledTimes(1)
 })
+
+test('uma ação que falha depois dos 8 s mostra a mensagem do núcleo e pede para recarregar', async () => {
+  const acao = vi.fn(() => Promise.reject({ codigo: 'bd', mensagem: 'Registo em uso.' }))
+  const aoFalhar = vi.fn()
+  render(
+    <DesfazerProvider aoFecharJanela={() => () => {}} aoFalhar={aoFalhar}>
+      <Apagar acao={acao} rotulo="Apagado: X" />
+      <Desfazer />
+    </DesfazerProvider>,
+  )
+  fireEvent.click(screen.getByText('Apagar'))
+  await act(async () => {
+    vi.advanceTimersByTime(8100)
+  })
+  expect(acao).toHaveBeenCalledTimes(1)
+  expect(screen.getByRole('alert').textContent).toContain('Registo em uso.')
+  expect(aoFalhar).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Fechar' }))
+  expect(screen.queryByRole('alert')).toBeNull()
+})

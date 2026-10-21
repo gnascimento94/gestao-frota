@@ -5,6 +5,7 @@ import { Botao } from '../ui/Botao'
 import { Cartao } from '../ui/Cartao'
 import { formatarDataHora, formatarQuando } from '../util/formato'
 import { paraErroApi, useCarregar } from './comum'
+import { restauraveis } from './textosVersoes'
 import { ListaVersoes } from './Versoes'
 
 const MSG_FORA_DO_DRIVE = 'Esta pasta não está no Google Drive — os dados não têm cópia na nuvem.'
@@ -44,11 +45,11 @@ export function Backup({
 
   function aoRestaurar(v: Versao) {
     setRestaurada(`Cópia de ${formatarDataHora(v.data)} restaurada ✓`)
-    recarregar()
+    // `onRestaurado` muda a `versao` da App, o que já volta a pedir a lista (um só pedido).
     onRestaurado()
   }
 
-  const ultima = versoes?.[0]
+  const ultima = versoes ? restauraveis(versoes)[0] : undefined
 
   return (
     <div className="backup">
@@ -61,16 +62,17 @@ export function Backup({
         }
       >
         <div className="cartao-corpo backup-estado">
-          {estado?.erro ? (
-            <p className="form-erro" role="alert">
-              Não foi possível guardar na pasta: {estado.erro}
-            </p>
-          ) : ultima ? (
+          {ultima ? (
             <p className="backup-ultima">
               Última cópia: {formatarQuando(ultima.data)} <span className="backup-ok">✓</span>
             </p>
           ) : (
             versoes && <p className="backup-ultima">Ainda não há cópias.</p>
+          )}
+          {estado?.erro && (
+            <p className="form-erro" role="alert">
+              {estado.erro}
+            </p>
           )}
           {erroCopia && (
             <p className="form-erro" role="alert">

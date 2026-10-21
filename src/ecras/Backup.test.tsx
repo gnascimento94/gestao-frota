@@ -1,5 +1,6 @@
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import * as api from '../api/comandos'
 import type { EstadoArmazenamento, Versao } from '../api/tipos'
@@ -46,11 +47,35 @@ test('mostra a última cópia, a pasta, o aviso fora do Drive e a versão', asyn
   expect(screen.getByText(/não foi possível ler/)).toBeTruthy()
 })
 
-test('no Google Drive não há aviso; erro de gravação aparece no lugar da última cópia', async () => {
+test('no Google Drive não há aviso; o erro de gravação aparece junto da última cópia', async () => {
   render(<Backup estado={estado({ noGoogleDrive: true, erro: 'Acesso negado' })} onRestaurado={() => {}} />)
-  expect(await screen.findByText(/Acesso negado/)).toBeTruthy()
-  expect(screen.queryByText(/Última cópia/)).toBeNull()
+  expect((await screen.findByRole('alert')).textContent).toBe('Acesso negado')
+  expect(await screen.findByText(/Última cópia: hoje, 18:42/)).toBeTruthy()
   expect(screen.queryByText(/não está no Google Drive/)).toBeNull()
+})
+
+test('a última cópia ignora o ficheiro danificado posto de lado', async () => {
+  m.listarVersoes.mockResolvedValue([
+    { nome: 'frota_danificado_2030-01-01_0900.db', data: '2030-01-01 09:00', tamanho: 1, carros: -1, lancamentos: -1 },
+    ...versoes,
+  ])
+  render(<Backup estado={estado()} onRestaurado={() => {}} />)
+  expect(await screen.findByText(/Última cópia: hoje, 18:42/)).toBeTruthy()
+  expect(screen.getByText(/Ficheiro danificado guardado à parte/)).toBeTruthy()
+})
+
+test('depois de restaurar a lista é pedida uma só vez', async () => {
+  function ComApp() {
+    const [versao, setVersao] = useState(0)
+    return <Backup estado={estado()} versao={versao} onRestaurado={() => setVersao((v) => v + 1)} />
+  }
+  render(<ComApp />)
+  const lista = await screen.findByRole('list', { name: 'Cópias disponíveis' })
+  expect(m.listarVersoes).toHaveBeenCalledTimes(1)
+  await userEvent.click(within(lista).getAllByRole('button', { name: 'Restaurar…' })[0])
+  await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Restaurar' }))
+  expect(await screen.findByText(/restaurada ✓/)).toBeTruthy()
+  expect(m.listarVersoes).toHaveBeenCalledTimes(2)
 })
 
 test('fazer cópia agora e restaurar com confirmação', async () => {
