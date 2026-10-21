@@ -6,7 +6,7 @@ import { Cartao } from '../ui/Cartao'
 import { ItemLista, Lista, Pilula, Valor } from '../ui/Lista'
 import { formatarData, formatarEuros, formatarKm, nomeMes } from '../util/formato'
 import { textoAlerta } from './alertas'
-import { useCarregar } from './comum'
+import { textoPorPagar, useCarregar } from './comum'
 
 interface InicioProps {
   /** Ano pedido à lista de carros (só para contar inativos e vendidos). */
@@ -100,7 +100,11 @@ export function Inicio({ ano, versao = 0, onNavegar }: InicioProps) {
         <Kpi rotulo="Gasto no ano" detalhe={String(p.ano)}>
           <Euros centimos={p.gastoAno} />
         </Kpi>
-        <Kpi rotulo="Por pagar (hoje)" detalhe="documentos e multas em dívida" aviso={p.porPagar > 0}>
+        <Kpi
+          rotulo="Por pagar (hoje)"
+          detalhe={textoPorPagar(p.porPagarVencido, p.porPagarProximo, p.porPagarDias)}
+          aviso={p.porPagar > 0}
+        >
           <Euros centimos={p.porPagar} />
         </Kpi>
         <Kpi rotulo="Carros ativos" detalhe={outros || undefined}>

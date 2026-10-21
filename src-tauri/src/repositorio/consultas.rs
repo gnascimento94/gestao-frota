@@ -10,7 +10,7 @@ use crate::regras::alertas::{
     alertas_cartas, alertas_documentos, alertas_manutencao, alertas_multas, ordenar,
 };
 use crate::regras::gastos::{
-    self, Categoria, Despesa, Periodo, Resumo, motorista_em, por_motorista, resumir,
+    self, Categoria, Despesa, Periodo, Resumo, motorista_em, por_motorista, por_pagar, resumir,
 };
 use crate::regras::km::km_atual;
 use chrono::{Datelike, NaiveDate};
@@ -26,7 +26,12 @@ pub struct Painel {
     pub mes: u32,
     pub gasto_mes: i64,
     pub gasto_ano: i64,
+    /// "Por pagar (hoje)" dos carros ativos: vencidos + próximos `por_pagar_dias`
+    /// dias (ver `regras::gastos::por_pagar`).
     pub por_pagar: i64,
+    pub por_pagar_vencido: i64,
+    pub por_pagar_proximo: i64,
+    pub por_pagar_dias: i64,
     pub carros_ativos: i64,
     pub alertas: Vec<Alerta>,
     pub recentes: Vec<HistoricoItem>,
@@ -117,13 +122,15 @@ pub fn despesas(conn: &Connection, carro_ids: Option<&[i64]>) -> Res<Vec<Despesa
                     valor: r.get(1)?,
                     pago: true,
                     data_ref: Some(col_data(r, 2)?),
+                    vencimento: None,
                     motorista_fixo: None,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         out.extend(v);
     }
-    let mut st = conn.prepare("SELECT carro_id, valor, pago_em, tipo FROM documentos")?;
+    let mut st =
+        conn.prepare("SELECT carro_id, valor, pago_em, tipo, vencimento FROM documentos")?;
     let v = st
         .query_map([], |r| {
             let pago_em = col_data_opt(r, 2)?;
@@ -134,13 +141,14 @@ pub fn despesas(conn: &Connection, carro_ids: Option<&[i64]>) -> Res<Vec<Despesa
                 valor: r.get(1)?,
                 pago: pago_em.is_some(),
                 data_ref: pago_em,
+                vencimento: Some(col_data(r, 4)?),
                 motorista_fixo: None,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     out.extend(v);
-    let mut st =
-        conn.prepare("SELECT carro_id, valor_empresa, pago_em, motorista_id FROM multas")?;
+    let mut st = conn
+        .prepare("SELECT carro_id, valor_empresa, pago_em, motorista_id, vencimento FROM multas")?;
     let v = st
         .query_map([], |r| {
             let pago_em = col_data_opt(r, 2)?;
@@ -150,6 +158,7 @@ pub fn despesas(conn: &Connection, carro_ids: Option<&[i64]>) -> Res<Vec<Despesa
                 valor: r.get(1)?,
                 pago: pago_em.is_some(),
                 data_ref: pago_em,
+                vencimento: col_data_opt(r, 4)?,
                 motorista_fixo: Some(r.get(3)?),
             })
         })?
@@ -189,11 +198,13 @@ pub fn painel(conn: &Connection, hoje: NaiveDate) -> Res<Painel> {
     let ativos = st
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
-    let por_pagar = todas
+    let dos_ativos: Vec<Despesa> = todas
         .iter()
-        .filter(|d| !d.pago && ativos.contains(&d.carro_id))
-        .map(|d| d.valor)
-        .sum();
+        .filter(|d| ativos.contains(&d.carro_id))
+        .copied()
+        .collect();
+    let dias = obter_limiares(conn)?.dias;
+    let divida = por_pagar(&dos_ativos, hoje, dias);
     let carros_ativos: i64 = conn.query_row(
         "SELECT COUNT(*) FROM carros WHERE estado = 'ativo'",
         [],
@@ -204,12 +215,19 @@ pub fn painel(conn: &Connection, hoje: NaiveDate) -> Res<Painel> {
         mes: hoje.month(),
         gasto_mes: mes.total,
         gasto_ano: ano.total,
-        por_pagar,
+        por_pagar: divida.total,
+        por_pagar_vencido: divida.vencido,
+        por_pagar_proximo: divida.proximo,
+        por_pagar_dias: dias,
         carros_ativos,
         alertas: alertas(conn, hoje)?,
         recentes: historico(conn, None, 10)?,
     })
 }
+
+/// Rótulo único para "sem motorista conhecido" no gasto por motorista e nas
+/// multas por motorista (despesa sem atribuição ou multa sem condutor identificado).
+pub const SEM_MOTORISTA: &str = "Sem motorista identificado";
 
 fn ordenar_desc(m: HashMap<String, i64>) -> Vec<(String, i64)> {
     let mut v: Vec<_> = m.into_iter().collect();
@@ -217,7 +235,8 @@ fn ordenar_desc(m: HashMap<String, i64>) -> Vec<(String, i64)> {
     v
 }
 
-pub fn relatorio(conn: &Connection, f: &FiltroRelatorio) -> Res<Relatorio> {
+/// `hoje` só serve para o "Por pagar (hoje)" (dívida atual, não do período).
+pub fn relatorio(conn: &Connection, f: &FiltroRelatorio, hoje: NaiveDate) -> Res<Relatorio> {
     let p = Periodo {
         de: data(&f.de)?,
         ate: data(&f.ate)?,
@@ -239,16 +258,17 @@ pub fn relatorio(conn: &Connection, f: &FiltroRelatorio) -> Res<Relatorio> {
     if let Some(m) = f.motorista_id {
         ds.retain(|d| motorista_da(d, &atribs) == Some(m));
     }
-    let resumo = resumir(&ds, &p);
+    let dias = obter_limiares(conn)?.dias;
+    let resumo = resumir(&ds, &p).com_por_pagar(por_pagar(&ds, hoje, dias), dias);
     let por_mot = por_motorista(&ds, &atribs, &p)
         .into_iter()
-        .map(|(m, v)| (m, nome(m, "Sem motorista"), v))
+        .map(|(m, v)| (m, nome(m, SEM_MOTORISTA), v))
         .collect();
 
     let (manutencao, por_tipo) = rel_manutencao(conn, &p, ids, f.motorista_id, &atribs)?;
     let mut multas = rel_multas(conn, &p, ids, f.motorista_id)?;
     for linha in &mut multas.por_motorista {
-        linha.1 = nome(linha.0, "Por identificar");
+        linha.1 = nome(linha.0, SEM_MOTORISTA);
     }
     Ok(Relatorio {
         resumo,

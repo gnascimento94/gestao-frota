@@ -346,5 +346,6 @@ pub fn painel(e: E<'_>) -> Res<Painel> {
 
 #[tauri::command(async)]
 pub fn relatorio(e: E<'_>, filtro: FiltroRelatorio) -> Res<Relatorio> {
-    e.ler(|c| consultas::relatorio(c, &filtro))
+    let h = hoje();
+    e.ler(|c| consultas::relatorio(c, &filtro, h))
 }

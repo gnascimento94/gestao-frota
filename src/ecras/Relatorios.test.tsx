@@ -10,7 +10,7 @@ vi.mock('../api/comandos')
 const m = vi.mocked(api)
 
 const vazio: Relatorio = {
-  resumo: { total: 0, porCategoria: {}, porMes: {}, totalPorMes: {}, porCarro: [], porPagar: 0 },
+  resumo: { total: 0, porCategoria: {}, porMes: {}, totalPorMes: {}, porCarro: [], porPagar: 0, porPagarVencido: 0, porPagarProximo: 0, porPagarDias: 30 },
   porMotorista: [],
   porTipoManutencao: [],
   manutencao: { interna: 0, oficina: 0, pecas: 0, maoObra: 0, naoDiscriminado: 0, porOficina: [] },
@@ -89,6 +89,9 @@ describe('Relatórios — conteúdo vindo do núcleo', () => {
         totalPorMes: { '2026-10': 123456 },
         porCarro: [[1, 123456]],
         porPagar: 5000,
+        porPagarVencido: 2000,
+        porPagarProximo: 3000,
+        porPagarDias: 30,
       },
       multas: { ...vazio.multas, n: 2, total: 9000, porReembolsar: 3000 },
     })
@@ -98,6 +101,7 @@ describe('Relatórios — conteúdo vindo do núcleo', () => {
     const total = await screen.findByLabelText('Total no período')
     expect(total.textContent).toMatch(/1\s234,56 €/)
     expect(screen.getByText('Por pagar (hoje)')).toBeTruthy()
+    expect(screen.getByText(/vencido 20,00 € · próximos 30 dias 30,00 €/)).toBeTruthy()
     const infracoes = screen.getByRole('region', { name: 'Infrações no período' })
     expect(within(infracoes).getByText(/data da infração/)).toBeTruthy()
     expect(within(infracoes).getByText('30,00 €')).toBeTruthy()

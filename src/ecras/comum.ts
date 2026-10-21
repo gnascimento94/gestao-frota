@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { ErroApi, EstadoCarro, EstadoMulta, Infracao } from '../api/tipos'
+import { formatarEuros } from '../util/formato'
 
 const dois = (n: number) => String(n).padStart(2, '0')
 
@@ -130,4 +131,9 @@ export const ROTULO_ESTADO_MULTA: Record<EstadoMulta, string> = {
   porPagar: 'Por pagar',
   porReembolsar: 'Por reembolsar',
   fechada: 'Fechada',
+}
+
+/** Divisão do "Por pagar (hoje)" (calculada no núcleo): "vencido X · próximos N dias Y". */
+export function textoPorPagar(vencido: number, proximo: number, dias: number): string {
+  return `vencido ${formatarEuros(vencido)} · próximos ${dias} dias ${formatarEuros(proximo)}`
 }

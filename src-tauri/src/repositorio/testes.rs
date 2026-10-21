@@ -333,6 +333,7 @@ fn multa_colaborador_nao_conta_no_gasto_da_frota() {
             carro_ids: None,
             motorista_id: None,
         },
+        hoje(),
     )
     .unwrap();
     assert_eq!(r.resumo.total, 1_000); // só a manutenção
@@ -923,7 +924,7 @@ fn relatorio_ano_por_categoria_e_motorista() {
         hoje(),
     )
     .unwrap();
-    lancar_documento(&mut c, &doc(c2, "IUC", 15_000, "2026-11-30", None), hoje()).unwrap();
+    lancar_documento(&mut c, &doc(c2, "IUC", 15_000, "2026-11-10", None), hoje()).unwrap();
     let mut mu1 = multa(c2, Some(ana), "2026-07-01", 12_000, "coparticipado");
     mu1.valor_empresa = Some(4_000);
     mu1.empresa_adiantou = true;
@@ -941,9 +942,12 @@ fn relatorio_ano_por_categoria_e_motorista() {
         carro_ids: None,
         motorista_id: mot,
     };
-    let r = relatorio(&c, &filtro(None)).unwrap();
+    let r = relatorio(&c, &filtro(None), hoje()).unwrap();
     assert_eq!(r.resumo.total, 59_000);
     assert_eq!(r.resumo.por_pagar, 15_000);
+    assert_eq!(r.resumo.por_pagar_vencido, 0);
+    assert_eq!(r.resumo.por_pagar_proximo, 15_000);
+    assert_eq!(r.resumo.por_pagar_dias, 30);
     assert_eq!(r.resumo.por_categoria[&Categoria::Manutencao], 10_000);
     assert_eq!(r.resumo.por_categoria[&Categoria::Pneus], 30_000);
     assert_eq!(r.resumo.por_categoria[&Categoria::Iuc], 15_000);
@@ -954,7 +958,7 @@ fn relatorio_ano_por_categoria_e_motorista() {
         vec![
             (Some(bruno), "Bruno".to_string(), 30_000),
             (Some(ana), "Ana".to_string(), 27_000),
-            (None, "Sem motorista".to_string(), 2_000),
+            (None, SEM_MOTORISTA.to_string(), 2_000),
         ]
     );
     assert_eq!(
@@ -991,13 +995,13 @@ fn relatorio_ano_por_categoria_e_motorista() {
     );
 
     // Filtro por motorista: Bruno = só os pneus de 30 000.
-    let rb = relatorio(&c, &filtro(Some(bruno))).unwrap();
+    let rb = relatorio(&c, &filtro(Some(bruno)), hoje()).unwrap();
     assert_eq!(rb.resumo.total, 30_000);
     assert_eq!(rb.resumo.por_categoria.len(), 1);
     assert_eq!(rb.multas.n, 0);
     assert_eq!(rb.manutencao.interna + rb.manutencao.oficina, 0);
     // Ana = 8 000 + 15 000 + 4 000 = 27 000 (a multa no carro 2 conta para ela).
-    let ra = relatorio(&c, &filtro(Some(ana))).unwrap();
+    let ra = relatorio(&c, &filtro(Some(ana)), hoje()).unwrap();
     assert_eq!(ra.resumo.total, 27_000);
     assert_eq!(ra.manutencao.oficina, 8_000);
     assert_eq!(ra.multas.n, 2);
@@ -1005,7 +1009,7 @@ fn relatorio_ano_por_categoria_e_motorista() {
     // Filtro por carro: só o carro 1 -> 8 000 + 15 000 = 23 000.
     let mut f = filtro(None);
     f.carro_ids = Some(vec![c1]);
-    let r1 = relatorio(&c, &f).unwrap();
+    let r1 = relatorio(&c, &f, hoje()).unwrap();
     assert_eq!(r1.resumo.total, 23_000);
     assert_eq!(r1.resumo.por_pagar, 0);
     assert_eq!(r1.multas.n, 1);
@@ -1085,7 +1089,8 @@ fn painel_conta_alertas_de_carros_ativos_apenas() {
     assert_eq!((p.ano, p.mes), (2026, 10));
     assert_eq!(p.gasto_mes, 1_000); // pneus do vendido em outubro
     assert_eq!(p.gasto_ano, 1_000);
-    assert_eq!(p.por_pagar, 2_000); // só o documento do carro ativo
+    // o documento do ativo vence daqui a mais de 30 dias e o do vendido não conta
+    assert_eq!(p.por_pagar, 0);
     assert_eq!(p.recentes.len(), 5); // 2 KM + 2 documentos + 1 pneu
     assert_eq!(listar_carros(&c, true, 2026).unwrap().len(), 1);
     assert_eq!(listar_carros(&c, false, 2026).unwrap().len(), 2);
@@ -1280,6 +1285,7 @@ fn relatorio_traz_total_por_mes() {
             carro_ids: None,
             motorista_id: None,
         },
+        hoje(),
     )
     .unwrap();
     assert_eq!(r.resumo.total_por_mes.get("2026-03"), Some(&3_500));
@@ -1322,7 +1328,7 @@ fn relatorio_por_reembolsar_usa_a_mesma_regra_da_ficha() {
     let ficha = multas_motorista(&c, ana, hoje()).unwrap().por_reembolsar;
     assert_eq!(ficha, 8_000);
     assert_eq!(
-        relatorio(&c, &filtro(Some(ana)))
+        relatorio(&c, &filtro(Some(ana)), hoje())
             .unwrap()
             .multas
             .por_reembolsar,
@@ -1331,7 +1337,10 @@ fn relatorio_por_reembolsar_usa_a_mesma_regra_da_ficha() {
     assert_eq!(soma(multas_listar(&c, None, Some(ana)).unwrap()), ficha);
     let todas = soma(multas_listar(&c, None, None).unwrap());
     assert_eq!(
-        relatorio(&c, &filtro(None)).unwrap().multas.por_reembolsar,
+        relatorio(&c, &filtro(None), hoje())
+            .unwrap()
+            .multas
+            .por_reembolsar,
         todas
     );
     assert_eq!(todas, 8_000);
@@ -1358,4 +1367,56 @@ fn tipo_de_manutencao_desativa_e_reativa() {
         definir_tipo_ativo(&c, 9999, false).unwrap_err().codigo,
         "nao_encontrado"
     );
+}
+
+/// "Por pagar (hoje)": um IUC anual pago gera o do ano seguinte (por pagar, a
+/// vencer daqui a um ano) — esse não conta. Vencidos e próximos 30 dias contam.
+#[test]
+fn por_pagar_hoje_exclui_o_documento_do_ano_seguinte() {
+    let mut c = bd();
+    let c1 = carro(&c, "AA-11-AA");
+    let mut iuc = doc(c1, "IUC", 15_000, "2026-10-31", None);
+    iuc.anual = true;
+    let id = lancar_documento(&mut c, &iuc, hoje()).unwrap();
+    // antes de pagar: vence dentro de 30 dias -> conta
+    let p = painel(&c, hoje()).unwrap();
+    assert_eq!(
+        (p.por_pagar, p.por_pagar_vencido, p.por_pagar_proximo),
+        (15_000, 0, 15_000)
+    );
+    let novo = pagar_documento(&mut c, id, "2026-10-15", hoje()).unwrap();
+    assert!(novo.is_some(), "gerou o IUC do ano seguinte");
+    // seguro vencido e multa da empresa com prazo dentro de 30 dias
+    lancar_documento(
+        &mut c,
+        &doc(c1, "seguro", 2_000, "2026-10-01", None),
+        hoje(),
+    )
+    .unwrap();
+    let mut m = multa(c1, None, "2026-10-01", 6_000, "empresa");
+    m.vencimento = Some("2026-11-05".into());
+    guardar_multa(&mut c, &m, hoje()).unwrap();
+    let p = painel(&c, hoje()).unwrap();
+    assert_eq!(p.por_pagar, 8_000);
+    assert_eq!(p.por_pagar_vencido, 2_000);
+    assert_eq!(p.por_pagar_proximo, 6_000);
+    assert_eq!(p.por_pagar_dias, 30);
+    let f = FiltroRelatorio {
+        de: "2026-01-01".into(),
+        ate: "2026-12-31".into(),
+        carro_ids: None,
+        motorista_id: None,
+    };
+    let r = relatorio(&c, &f, hoje()).unwrap();
+    assert_eq!(r.resumo.por_pagar, 8_000);
+    // com um limiar de 60 dias, a multa e nada mais (o IUC de 2027 continua fora)
+    guardar_limiares(
+        &c,
+        &Limiares {
+            km: 1_000,
+            dias: 60,
+        },
+    )
+    .unwrap();
+    assert_eq!(painel(&c, hoje()).unwrap().por_pagar, 8_000);
 }

@@ -7,7 +7,7 @@ import { Cartao } from '../ui/Cartao'
 import { Grafico } from '../ui/Grafico'
 import { CORES_CATEGORIA, ORDEM_CATEGORIAS, ROTULO_CATEGORIA } from '../util/categorias'
 import { formatarEuros } from '../util/formato'
-import { ROTULO_INFRACAO, hoje, paraErroApi, useCarregar } from './comum'
+import { ROTULO_INFRACAO, hoje, paraErroApi, textoPorPagar, useCarregar } from './comum'
 import { dataValida, mesesDoPeriodo, periodoDe, type Periodo, type Preset } from './periodos'
 
 type Escolha = Preset | 'personalizado'
@@ -330,6 +330,9 @@ export function Relatorios({ versao = 0, onNavegar }: RelatoriosProps) {
                 <div>
                   <dt>Por pagar (hoje)</dt>
                   <dd className="relatorio-por-pagar">{formatarEuros(r.resumo.porPagar)}</dd>
+                  <dd className="metrica-nota">
+                    {textoPorPagar(r.resumo.porPagarVencido, r.resumo.porPagarProximo, r.resumo.porPagarDias)}
+                  </dd>
                   <dd className="metrica-nota">Dívida atual; não depende do período.</dd>
                 </div>
               </dl>

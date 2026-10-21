@@ -22,6 +22,9 @@ pub struct Despesa {
     pub valor: i64,
     pub pago: bool,
     pub data_ref: Option<NaiveDate>,
+    /// Prazo de pagamento (documentos e multas); `None` nas despesas já feitas
+    /// ou numa multa sem prazo.
+    pub vencimento: Option<NaiveDate>,
     /// `Some(x)`: motorista fixo (`Some(None)` = por identificar); `None`: resolver por atribuição.
     pub motorista_fixo: Option<Option<i64>>,
 }
@@ -42,7 +45,52 @@ pub struct Resumo {
     /// Total de cada mês ("AAAA-MM"), soma das categorias de `por_mes`.
     pub total_por_mes: BTreeMap<String, i64>,
     pub por_carro: Vec<(i64, i64)>,
+    /// "Por pagar (hoje)": dívida atual (não depende do período), ver `por_pagar`.
+    /// `resumir` deixa-os a 0; quem tem `hoje` preenche-os (`com_por_pagar`).
     pub por_pagar: i64,
+    pub por_pagar_vencido: i64,
+    pub por_pagar_proximo: i64,
+    /// N.º de dias (limiar) usado em `por_pagar_proximo`.
+    pub por_pagar_dias: i64,
+}
+
+impl Resumo {
+    pub fn com_por_pagar(mut self, p: PorPagar, dias: i64) -> Self {
+        self.por_pagar = p.total;
+        self.por_pagar_vencido = p.vencido;
+        self.por_pagar_proximo = p.proximo;
+        self.por_pagar_dias = dias;
+        self
+    }
+}
+
+/// "Por pagar (hoje)" = documentos e multas (parte da empresa) por pagar já
+/// vencidos ou que vencem nos próximos `dias` dias. Os que vencem mais tarde
+/// (p.ex. o IUC do ano seguinte criado ao pagar o deste ano) não contam.
+#[derive(Debug, Serialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PorPagar {
+    pub total: i64,
+    /// Vencimento antes de hoje.
+    pub vencido: i64,
+    /// Vencimento de hoje a hoje + `dias` (inclusive), ou sem prazo conhecido.
+    pub proximo: i64,
+}
+
+pub fn por_pagar(despesas: &[Despesa], hoje: NaiveDate, dias: i64) -> PorPagar {
+    let limite = hoje + chrono::Duration::days(dias.max(0));
+    let mut r = PorPagar::default();
+    for d in despesas.iter().filter(|d| !d.pago) {
+        match d.vencimento {
+            Some(v) if v < hoje => r.vencido += d.valor,
+            Some(v) if v <= limite => r.proximo += d.valor,
+            Some(_) => continue,
+            // Multa sem prazo: é dívida atual, sem data para a excluir.
+            None => r.proximo += d.valor,
+        }
+        r.total += d.valor;
+    }
+    r
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,11 +114,13 @@ pub fn resumir(despesas: &[Despesa], p: &Periodo) -> Resumo {
         total_por_mes: BTreeMap::new(),
         por_carro: Vec::new(),
         por_pagar: 0,
+        por_pagar_vencido: 0,
+        por_pagar_proximo: 0,
+        por_pagar_dias: 0,
     };
     let mut carros: BTreeMap<i64, i64> = BTreeMap::new();
     for d in despesas {
         if !d.pago {
-            r.por_pagar += d.valor;
             continue;
         }
         let Some(data) = conta(d, p) else { continue };
@@ -144,6 +194,7 @@ mod testes {
             valor,
             pago,
             data_ref: data,
+            vencimento: None,
             motorista_fixo: None,
         }
     }
@@ -178,7 +229,43 @@ mod testes {
         ];
         let r = resumir(&ds, &s1());
         assert_eq!(r.total, 10_000);
-        assert_eq!(r.por_pagar, 15_000);
+        assert_eq!(
+            r.por_pagar, 0,
+            "resumir não calcula a dívida (precisa de hoje)"
+        );
+    }
+
+    #[test]
+    fn por_pagar_conta_vencidos_e_proximos_dias_e_exclui_os_mais_tarde() {
+        let hoje = d(10, 20);
+        let mut ds = vec![
+            // IUC deste ano pago; o do ano seguinte foi gerado por pagar
+            desp(1, Iuc, 15_000, true, Some(d(5, 20))),
+            desp(1, Iuc, 15_000, false, None),
+            desp(1, Seguro, 7_000, false, None),
+            desp(2, Inspecao, 3_000, false, None),
+            desp(2, Outro, 500, false, None),
+            desp(2, Multa, 4_000, false, None),
+        ];
+        ds[0].vencimento = Some(d(5, 31));
+        ds[1].vencimento = Some(NaiveDate::from_ymd_opt(2027, 5, 31).unwrap()); // fora
+        ds[2].vencimento = Some(d(10, 1)); // vencido
+        ds[3].vencimento = Some(d(11, 19)); // hoje + 30: conta
+        ds[4].vencimento = Some(d(11, 20)); // hoje + 31: fora
+        // multa sem prazo: conta como próxima
+        let p = por_pagar(&ds, hoje, 30);
+        assert_eq!(
+            p,
+            PorPagar {
+                total: 14_000,
+                vencido: 7_000,
+                proximo: 7_000
+            }
+        );
+        // vence hoje = próximo, não vencido
+        ds[2].vencimento = Some(hoje);
+        assert_eq!(por_pagar(&ds, hoje, 30).vencido, 0);
+        assert_eq!(por_pagar(&ds, hoje, 0).proximo, 7_000 + 4_000);
     }
 
     #[test]

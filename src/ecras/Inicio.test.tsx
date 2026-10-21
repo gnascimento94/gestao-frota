@@ -73,6 +73,9 @@ describe('Início', () => {
     gastoMes: 128450,
     gastoAno: 1894230,
     porPagar: 61200,
+    porPagarVencido: 12000,
+    porPagarProximo: 49200,
+    porPagarDias: 30,
     carrosAtivos: 23,
     alertas: [
       alerta({ nivel: 'vencido', motivo: 'km', faltaKm: -200 }),
@@ -103,6 +106,7 @@ describe('Início', () => {
     // o ano mostrado é o que o núcleo usou
     expect(await kpi('Gasto no ano')).toMatch(/18\s942,30 €2025/)
     expect(await kpi('Por pagar (hoje)')).toMatch(/612,00 €/)
+    expect(await kpi('Por pagar (hoje)')).toMatch(/vencido 120,00 € · próximos 30 dias 492,00 €/)
     expect(await kpi('Carros ativos')).toMatch(/23/)
     expect(m.limiaresObter).not.toHaveBeenCalled()
   })

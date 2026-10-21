@@ -35,7 +35,7 @@ function carro(id: number, matricula: string, extra: Partial<Carro> = {}): Carro
 }
 
 const relatorioVazio: Relatorio = {
-  resumo: { total: 0, porCategoria: {}, porMes: {}, totalPorMes: {}, porCarro: [], porPagar: 0 },
+  resumo: { total: 0, porCategoria: {}, porMes: {}, totalPorMes: {}, porCarro: [], porPagar: 0, porPagarVencido: 0, porPagarProximo: 0, porPagarDias: 30 },
   porMotorista: [],
   porTipoManutencao: [],
   manutencao: { interna: 0, oficina: 0, pecas: 0, maoObra: 0, naoDiscriminado: 0, porOficina: [] },
