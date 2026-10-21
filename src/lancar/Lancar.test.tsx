@@ -228,11 +228,37 @@ test('IUC vem marcado como anual', async () => {
 test('erro do núcleo aparece no campo respetivo (data futura → data)', async () => {
   m.lancarPneu.mockRejectedValue({ codigo: 'data_futura', mensagem: 'A data não pode ser no futuro.' })
   const { user } = await abrir('Pneus')
+  await user.click(screen.getByLabelText('Frente esquerda'))
   await user.type(screen.getByLabelText('Valor (€)'), '80')
   await user.click(lancar())
   expect(await screen.findByText('A data não pode ser no futuro.')).toBeTruthy()
   expect(screen.getByLabelText('Data').getAttribute('aria-invalid')).toBe('true')
   expect(screen.getByRole('dialog')).toBeTruthy()
+})
+
+test('pneus: envia os pneus escolhidos pela ordem da grelha num só lançamento', async () => {
+  const { user, onLancado } = await abrir('Pneus')
+  await user.click(screen.getByLabelText('Trás direita'))
+  await user.click(screen.getByLabelText('Trás esquerda'))
+  await user.click(screen.getByLabelText('Suplente'))
+  await user.click(screen.getByLabelText('Suplente')) // desmarca
+  await user.type(screen.getByLabelText('Valor (€)'), '160')
+  expect(screen.getByText('Valor total dos 2 pneus.')).toBeTruthy()
+  await user.click(lancar())
+  await waitFor(() => expect(onLancado).toHaveBeenCalled())
+  expect(m.lancarPneu).toHaveBeenCalledTimes(1)
+  expect(m.lancarPneu.mock.calls[0][0]).toMatchObject({ posicoes: ['TE', 'TD'], valor: 16000 })
+})
+
+test('pneus: sem nenhum pneu escolhido não envia', async () => {
+  const { user } = await abrir('Pneus')
+  await user.type(screen.getByLabelText('Valor (€)'), '80')
+  await user.click(lancar())
+  expect(await screen.findByText('Escolha pelo menos um pneu.')).toBeTruthy()
+  expect(screen.getByRole('group', { name: 'Pneus' }).getAttribute('aria-invalid')).toBe('true')
+  expect(m.lancarPneu).not.toHaveBeenCalled()
+  await user.click(screen.getByLabelText('Frente direita'))
+  expect(screen.queryByText('Escolha pelo menos um pneu.')).toBeNull()
 })
 
 

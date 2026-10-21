@@ -71,6 +71,54 @@
   font-weight: 500;
 }
 
+/* Pneus trocados: grelha como o carro visto de cima (frente em cima) */
+
+.pneus-posicoes {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pneus-posicoes legend {
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.pneus-posicoes .campo-erro {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.pneu-opcao {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: var(--borda);
+  border-radius: var(--raio-p);
+  background: var(--superficie);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.pneu-opcao:has(input:checked) {
+  border-color: var(--verde);
+}
+
+.pneu-opcao input {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--verde);
+}
+
+.pneus-posicoes[aria-invalid='true'] .pneu-opcao {
+  border-color: var(--vermelho);
+}
+
 /* Interruptor (switch) */
 
 .interruptor-switch {

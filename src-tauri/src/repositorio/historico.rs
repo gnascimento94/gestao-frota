@@ -1,4 +1,4 @@
-use super::lancamentos::nome_documento;
+use super::lancamentos::{nome_documento, nome_posicoes};
 use super::multas::{ESTADO_MULTA_SQL, EstadoMulta};
 use crate::erro::Res;
 use rusqlite::{Connection, params};
@@ -70,7 +70,7 @@ pub fn historico(conn: &Connection, carro_id: Option<i64>, limite: i64) -> Res<V
             let a = a.unwrap_or_default();
             let titulo = match tipo.as_str() {
                 "manutencao" => a,
-                "pneu" => format!("Pneus ({a})"),
+                "pneu" => format!("Pneus ({})", nome_posicoes(&a)),
                 "documento" => nome_documento(&a).to_string(),
                 "multa" => format!("Multa ({a})"),
                 _ => "Atualização de KM".to_string(),

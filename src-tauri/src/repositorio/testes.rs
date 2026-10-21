@@ -81,7 +81,7 @@ fn pneu(carro_id: i64, data: &str, valor: i64) -> PneuInput {
         carro_id,
         data: data.into(),
         km: None,
-        posicao: "todos".into(),
+        posicoes: vec!["FE".into(), "FD".into()],
         marca: None,
         modelo: None,
         motivo: "troca".into(),
@@ -217,6 +217,49 @@ fn km_abaixo_pede_confirmacao() {
     // leitura com data anterior à de 70 000 não compara com ela
     atualizar_km(&mut c, &km(a, "2026-09-01", 60_000, false), hoje()).unwrap();
     assert_eq!(obter_carro(&c, a, 2026).unwrap().km_atual, 70_000);
+}
+
+#[test]
+fn pneus_varias_posicoes_num_lancamento() {
+    let mut c = bd();
+    let a = carro(&c, "AA-12-BB");
+    let mut p = pneu(a, "2026-10-01", 16_000);
+    // repetidas e fora de ordem: guardadas uma vez, pela ordem FE, FD, TE, TD, suplente
+    p.posicoes = vec!["TD".into(), "TE".into(), "TD".into()];
+    let id = lancar_pneu(&mut c, &p, hoje()).unwrap();
+    let guardada: String = c
+        .query_row("SELECT posicao FROM pneus WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(guardada, "TE,TD");
+    // um só lançamento, com o valor total
+    let h = historico(&c, Some(a), 10).unwrap();
+    assert_eq!(h.len(), 1);
+    assert_eq!(h[0].titulo, "Pneus (trás)");
+    assert_eq!(h[0].valor, Some(16_000));
+
+    p.posicoes = vec![];
+    let e = lancar_pneu(&mut c, &p, hoje()).unwrap_err();
+    assert_eq!(
+        (e.codigo.as_str(), e.campo.as_deref()),
+        ("sem_posicoes", Some("posicoes"))
+    );
+    p.posicoes = vec!["FE".into(), "todos".into()];
+    assert_eq!(
+        lancar_pneu(&mut c, &p, hoje()).unwrap_err().codigo,
+        "posicao_invalida"
+    );
+}
+
+#[test]
+fn nome_das_posicoes_dos_pneus() {
+    assert_eq!(nome_posicoes("FE,FD"), "frente");
+    assert_eq!(nome_posicoes("FE,FD,TE,TD"), "os 4");
+    assert_eq!(nome_posicoes("FE,FD,TE,TD,suplente"), "os 4, suplente");
+    assert_eq!(nome_posicoes("FE,TD"), "frente esq., trás dir.");
+    assert_eq!(nome_posicoes("FD,TE,TD"), "frente dir., trás");
+    assert_eq!(nome_posicoes("suplente"), "suplente");
 }
 
 #[test]

@@ -148,13 +148,14 @@ export interface ManutencaoInput {
   confirmado: boolean
 }
 
-export type PosicaoPneu = 'FE' | 'FD' | 'TE' | 'TD' | 'suplente' | 'todos'
+export type PosicaoPneu = 'FE' | 'FD' | 'TE' | 'TD' | 'suplente'
 
 export interface PneuInput {
   carroId: number
   data: string
   km?: number | null
-  posicao: PosicaoPneu
+  /** Pneus trocados (pelo menos um); o valor é o total de todos. */
+  posicoes: PosicaoPneu[]
   marca?: string | null
   modelo?: string | null
   motivo: 'troca' | 'rodizio'

@@ -2,7 +2,7 @@ use super::{
     Tabela, data, data_opt, erro, existe, fmt_data, inserir_leitura, nao_encontrado, nao_futura,
     opcao, texto, validar_data_carro, validar_km, validar_valor,
 };
-use crate::erro::{DataNoCampo, Res};
+use crate::erro::{DataNoCampo, Erro, Res};
 use crate::regras::documentos::proximo_anual;
 use chrono::NaiveDate;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -31,8 +31,8 @@ pub struct PneuInput {
     pub carro_id: i64,
     pub data: String,
     pub km: Option<i64>,
-    /// FE | FD | TE | TD | suplente | todos.
-    pub posicao: String,
+    /// Pneus trocados: FE | FD | TE | TD | suplente (pelo menos um).
+    pub posicoes: Vec<String>,
     pub marca: Option<String>,
     pub modelo: Option<String>,
     /// troca | rodizio.
@@ -64,8 +64,64 @@ pub struct KmInput {
 }
 
 pub(crate) const TIPOS_DOCUMENTO: [&str; 4] = ["IUC", "inspecao", "seguro", "outro"];
-const POSICOES: [&str; 6] = ["FE", "FD", "TE", "TD", "suplente", "todos"];
+/// Pela ordem em que ficam guardadas (`pneus.posicao` = "FE,FD", …).
+const POSICOES: [&str; 5] = ["FE", "FD", "TE", "TD", "suplente"];
 const MOTIVOS: [&str; 2] = ["troca", "rodizio"];
+
+/// Valida as posições e devolve-as como ficam na base de dados: sem repetidas,
+/// pela ordem de `POSICOES`, separadas por vírgulas.
+fn lista_posicoes(posicoes: &[String]) -> Res<String> {
+    let mut escolhidas = [false; POSICOES.len()];
+    for p in posicoes {
+        let p = opcao(
+            p,
+            &POSICOES,
+            "posicao_invalida",
+            "Posição do pneu inválida.",
+        )?;
+        escolhidas[POSICOES.iter().position(|&v| v == p).unwrap()] = true;
+    }
+    let v: Vec<&str> = POSICOES
+        .iter()
+        .zip(escolhidas)
+        .filter_map(|(&p, e)| e.then_some(p))
+        .collect();
+    if v.is_empty() {
+        return Err(Erro {
+            campo: Some("posicoes".into()),
+            codigo: "sem_posicoes".into(),
+            mensagem: "Escolha pelo menos um pneu.".into(),
+        });
+    }
+    Ok(v.join(","))
+}
+
+/// Nome legível das posições guardadas ("FE,FD" → "frente"; as quatro → "os 4").
+pub(crate) fn nome_posicoes(lista: &str) -> String {
+    let tem = |p: &str| lista.split(',').any(|v| v == p);
+    let mut partes = Vec::new();
+    let eixos = [("FE", "FD", "frente"), ("TE", "TD", "trás")];
+    if eixos.iter().all(|(e, d, _)| tem(e) && tem(d)) {
+        partes.push("os 4".to_string());
+    } else {
+        for (e, d, eixo) in eixos {
+            match (tem(e), tem(d)) {
+                (true, true) => partes.push(eixo.to_string()),
+                (true, false) => partes.push(format!("{eixo} esq.")),
+                (false, true) => partes.push(format!("{eixo} dir.")),
+                (false, false) => {}
+            }
+        }
+    }
+    if tem("suplente") {
+        partes.push("suplente".into());
+    }
+    // valores antigos ou desconhecidos: mostrar como estão
+    if partes.is_empty() {
+        return lista.to_string();
+    }
+    partes.join(", ")
+}
 
 /// Nome legível de um tipo de documento.
 pub(crate) fn nome_documento(tipo: &str) -> &'static str {
@@ -170,12 +226,7 @@ pub fn oficinas_usadas(conn: &Connection) -> Res<Vec<String>> {
 pub fn lancar_pneu(conn: &mut Connection, p: &PneuInput, hoje: NaiveDate) -> Res<i64> {
     let dia = data(&p.data)?;
     validar_valor(p.valor)?;
-    let posicao = opcao(
-        &p.posicao,
-        &POSICOES,
-        "posicao_invalida",
-        "Posição do pneu inválida.",
-    )?;
+    let posicao = lista_posicoes(&p.posicoes)?;
     let motivo = opcao(&p.motivo, &MOTIVOS, "motivo_invalido", "Motivo inválido.")?;
     let tx = conn.transaction()?;
     validar_data_carro(&tx, p.carro_id, dia, hoje)?;

@@ -1,7 +1,10 @@
 use crate::erro::{Erro, Res};
 use rusqlite::Connection;
 
-pub const MIGRACOES: &[&str] = &[include_str!("001_inicial.sql")];
+pub const MIGRACOES: &[&str] = &[
+    include_str!("001_inicial.sql"),
+    include_str!("002_pneus_posicoes.sql"),
+];
 
 pub fn versao_esquema(conn: &Connection) -> Res<i64> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
@@ -91,6 +94,41 @@ mod testes {
         assert_eq!(
             contar(&c, "SELECT COUNT(*) FROM sqlite_master WHERE name='x'"),
             0
+        );
+    }
+
+    #[test]
+    fn pneus_antigos_passam_a_lista_de_posicoes() {
+        let mut c = mem();
+        migrar_com(&mut c, &MIGRACOES[..1]).unwrap();
+        c.execute_batch(
+            "INSERT INTO carros(matricula) VALUES ('AA-00-AA');
+             INSERT INTO pneus(id,carro_id,data,posicao,valor) VALUES (7,1,'2026-01-01','todos',100);
+             INSERT INTO pneus(id,carro_id,data,posicao,valor) VALUES (8,1,'2026-02-01','FD',50);",
+        )
+        .unwrap();
+        migrar(&mut c).unwrap();
+        let v: Vec<(i64, String, i64)> = c
+            .prepare("SELECT id, posicao, valor FROM pneus ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(v, [(7, "FE,FD,TE,TD".into(), 100), (8, "FD".into(), 50)]);
+        assert!(
+            c.execute(
+                "INSERT INTO pneus(carro_id,data,posicao) VALUES (1,'2026-03-01','')",
+                []
+            )
+            .is_err()
+        );
+        assert_eq!(
+            contar(
+                &c,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='idx_pneus_carro_data'"
+            ),
+            1
         );
     }
 
